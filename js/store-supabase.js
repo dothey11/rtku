@@ -50,7 +50,7 @@ window.SupaStore = function (cfg) {
     async bayar(bulan, metode) { ok(await sb.rpc("bayar_tagihan", { p_bulan: bulan, p_metode: metode })); },
     async tunai(rumah, bulan) { ok(await sb.rpc("catat_tunai", { p_rumah: rumah, p_bulan: bulan })); },
     async buatTagihan(bulan) { ok(await sb.rpc("buat_tagihan", { p_bulan: bulan })); },
-    async keluar_kas(d) { ok(await sb.from("kas").insert({ tgl: d.tgl, ket: d.ket, jenis: "keluar", jml: d.jml })); },
+    async catatKas(d) { ok(await sb.from("kas").insert({ tgl: d.tgl, ket: d.ket, jenis: d.jenis, jml: d.jml })); },
 
     // ----- surat -----
     async ajukanSurat(d) { ok(await sb.from("surat").insert({ jenis: d.jenis, keperluan: d.keperluan })); },

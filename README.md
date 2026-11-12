@@ -15,6 +15,7 @@ js/store-supabase.js     baca/tulis ke database
 js/store-demo.js         data contoh untuk mode demo
 database/schema.sql      tabel, aturan akses (RLS), fungsi, realtime, storage
 database/seed.sql        data awal contoh
+database/migrasi-002-peran-pengurus.sql   pembaruan untuk database lama: peran Bendahara dan Sekretaris
 ```
 
 ## Dua mode
@@ -62,19 +63,27 @@ Untuk mencoba di komputer sendiri: `npx serve .` lalu buka alamat yang ditampilk
 
 ## Hak akses per peran
 
-| Data | Warga | Satpam | Ketua RT |
-|---|---|---|---|
-| Laporan kas | lihat | lihat | lihat, catat pengeluaran |
-| Tagihan | rumah sendiri, bayar | tidak | semua, catat tunai, buat tagihan bulanan |
-| Surat | ajukan, lihat milik sendiri | tidak | lihat semua, setujui/tolak |
-| SOS | kirim, lihat milik sendiri | lihat semua, tangani | lihat semua, tangani |
-| Pengumuman, polling | lihat, memilih | lihat, memilih | buat |
-| Lapor RT | lihat, buat | lihat, buat | ubah status |
-| Data warga | rumah sendiri | tidak | semua, tambah |
-| Buku tamu | rumah sendiri, lapor | lihat semua | lihat semua |
-| Akun pengguna | profil sendiri | profil sendiri | verifikasi, ganti peran |
+Ada lima peran: **warga**, **ketua**, **bendahara**, **sekretaris**, dan **satpam**. Ketua RT, Bendahara, dan Sekretaris disebut pengurus.
+
+| Data | Warga | Bendahara | Sekretaris | Ketua RT | Satpam |
+|---|---|---|---|---|---|
+| Laporan kas | lihat | lihat, catat pemasukan dan pengeluaran | lihat | lihat, catat | lihat |
+| Tagihan iuran | rumah sendiri, bayar | semua, catat tunai, buat tagihan bulanan | rumah sendiri, bayar | semua, catat tunai, buat tagihan | tidak |
+| Surat | ajukan, lihat milik sendiri | ajukan, lihat milik sendiri | lihat semua, ajukan | lihat semua, setujui/tolak | tidak |
+| SOS | kirim, lihat milik sendiri | kirim, lihat semua, tangani | kirim, lihat semua, tangani | kirim, lihat semua, tangani | lihat semua, tangani |
+| Pengumuman, polling | lihat, memilih | lihat, memilih | buat | buat | lihat, memilih |
+| Lapor RT | lihat, buat | lihat, buat | ubah status | ubah status | lihat, buat |
+| Data warga | rumah sendiri | lihat semua (di database) | lihat semua, tambah | lihat semua, tambah | tidak |
+| Buku tamu | rumah sendiri, lapor | rumah sendiri, lapor | lihat semua | lihat semua | lihat semua |
+| Akun pengguna | profil sendiri | profil sendiri | profil sendiri | verifikasi, ganti peran | profil sendiri |
+
+Menyetujui surat hanya bisa dilakukan Ketua RT, karena surat terbit atas namanya. Memverifikasi akun dan mengganti peran juga hanya Ketua RT, lewat menu **Warga & Tamu > Akun pengguna**: pilih peran, lalu klik Verifikasi atau Simpan peran.
 
 Aturan ini ditegakkan di database (`database/schema.sql` bagian 3), bukan hanya di tampilan.
+
+### Database yang sudah terpasang sebelum ada Bendahara dan Sekretaris
+
+Jalankan `database/migrasi-002-peran-pengurus.sql` satu kali di SQL Editor. Database baru yang dibuat dari `schema.sql` terbaru tidak memerlukannya.
 
 ## Yang belum ada
 
@@ -87,4 +96,4 @@ Aturan ini ditegakkan di database (`database/schema.sql` bagian 3), bukan hanya 
 
 ## Status pengujian
 
-Skema, aturan akses, dan fungsi database diuji pada PostgreSQL 16. Tampilan diuji dalam mode demo dan dengan klien Supabase tiruan. Sambungan ke proyek Supabase sungguhan belum diuji, jadi coba semua alur setelah langkah pemasangan di atas.
+Skema, migrasi, aturan akses kelima peran, dan fungsi database diuji pada PostgreSQL 16. Tampilan diuji dalam mode demo dan dengan klien Supabase tiruan. Sambungan ke proyek Supabase sungguhan belum diuji, jadi coba semua alur setelah langkah pemasangan di atas.

@@ -50,7 +50,7 @@ button{cursor:pointer}
 .top{display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center;justify-content:space-between;padding:14px 24px;border-bottom:1px solid var(--line);background:var(--surface);position:sticky;top:0;z-index:5}
 .who{display:flex;flex-direction:column}
 .who b{font-size:15px}
-.roles{display:flex;gap:4px;background:var(--bg);padding:4px;border-radius:12px;border:1px solid var(--line)}
+.roles{display:flex;flex-wrap:wrap;gap:4px;background:var(--bg);padding:4px;border-radius:12px;border:1px solid var(--line)}
 .roles button{border:0;background:transparent;padding:7px 12px;border-radius:9px;font-weight:600;color:var(--muted)}
 .roles button[aria-pressed="true"]{background:var(--surface);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.14)}
 .demo{background:var(--warn-soft);color:var(--warn);font-size:13px;padding:8px 24px;font-weight:500}
@@ -132,3 +132,4 @@ td.r,th.r{text-align:right}
 .shell.polos{grid-template-columns:1fr}
 .shell.polos .side,.shell.polos .bottom{display:none}
 @media (max-width:860px){ .live{padding-left:16px;padding-right:16px} }
+.acts select{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:5px 8px;font-size:13px}

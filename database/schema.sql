@@ -11,7 +11,7 @@ create table public.profiles (
   id      uuid primary key references auth.users(id) on delete cascade,
   nama    text not null,
   rumah   text not null default '-',
-  peran   text not null default 'warga' check (peran in ('warga','ketua','satpam')),
+  peran   text not null default 'warga' check (peran in ('warga','ketua','bendahara','sekretaris','satpam')),
   aktif   boolean not null default false,
   dibuat  timestamptz not null default now()
 );
@@ -193,28 +193,28 @@ create policy profil_ubah on public.profiles for update to authenticated
 create policy iuran_lihat on public.iuran_jenis for select to authenticated
   using (public.peran() is not null);
 create policy iuran_atur on public.iuran_jenis for all to authenticated
-  using (public.peran() = 'ketua') with check (public.peran() = 'ketua');
+  using (public.peran() in ('ketua','bendahara')) with check (public.peran() in ('ketua','bendahara'));
 
 -- Data warga: Ketua RT melihat semua, warga hanya rumahnya sendiri.
 create policy warga_lihat on public.warga for select to authenticated
-  using (public.peran() = 'ketua' or rumah = public.rumah_saya());
+  using (public.peran() in ('ketua','sekretaris','bendahara') or rumah = public.rumah_saya());
 create policy warga_atur on public.warga for all to authenticated
-  using (public.peran() = 'ketua') with check (public.peran() = 'ketua');
+  using (public.peran() in ('ketua','sekretaris')) with check (public.peran() in ('ketua','sekretaris'));
 
 -- Tagihan: warga melihat tagihan rumahnya, Ketua RT semua.
 -- Perubahan status lunas hanya lewat fungsi di bagian 4.
 create policy tagihan_lihat on public.tagihan for select to authenticated
-  using (public.peran() = 'ketua' or rumah = public.rumah_saya());
+  using (public.peran() in ('ketua','bendahara') or rumah = public.rumah_saya());
 
 -- Kas: laporan terbuka untuk semua akun aktif; Ketua RT mencatat.
 create policy kas_lihat on public.kas for select to authenticated
   using (public.peran() is not null);
 create policy kas_catat on public.kas for insert to authenticated
-  with check (public.peran() = 'ketua');
+  with check (public.peran() in ('ketua','bendahara'));
 
 -- Surat: warga mengajukan dan melihat miliknya; Ketua RT melihat dan memutuskan.
 create policy surat_lihat on public.surat for select to authenticated
-  using (public.peran() = 'ketua' or user_id = auth.uid());
+  using (public.peran() in ('ketua','sekretaris') or user_id = auth.uid());
 create policy surat_ajukan on public.surat for insert to authenticated
   with check (user_id = auth.uid() and rumah = public.rumah_saya() and pemohon = public.nama_saya()
               and status = 'Menunggu' and nomor is null and kode is null);
@@ -223,27 +223,27 @@ create policy surat_putuskan on public.surat for update to authenticated
 
 -- SOS: pengirim melihat miliknya; Ketua RT dan satpam melihat dan menangani semua.
 create policy sos_lihat on public.sos for select to authenticated
-  using (public.peran() in ('ketua','satpam') or user_id = auth.uid());
+  using (public.peran() in ('ketua','bendahara','sekretaris','satpam') or user_id = auth.uid());
 create policy sos_kirim on public.sos for insert to authenticated
   with check (user_id = auth.uid() and rumah = public.rumah_saya() and nama = public.nama_saya()
               and status = 'Aktif');
 create policy sos_tangani on public.sos for update to authenticated
-  using (public.peran() in ('ketua','satpam')) with check (public.peran() in ('ketua','satpam'));
+  using (public.peran() in ('ketua','bendahara','sekretaris','satpam')) with check (public.peran() in ('ketua','bendahara','sekretaris','satpam'));
 
 -- Pengumuman dan polling: semua akun aktif membaca, Ketua RT membuat.
 create policy umum_lihat on public.pengumuman for select to authenticated
   using (public.peran() is not null);
 create policy umum_buat on public.pengumuman for insert to authenticated
-  with check (public.peran() = 'ketua');
+  with check (public.peran() in ('ketua','sekretaris'));
 
 create policy polling_lihat on public.polling for select to authenticated
   using (public.peran() is not null);
 create policy polling_buat on public.polling for insert to authenticated
-  with check (public.peran() = 'ketua');
+  with check (public.peran() in ('ketua','sekretaris'));
 create policy opsi_lihat on public.polling_opsi for select to authenticated
   using (public.peran() is not null);
 create policy opsi_buat on public.polling_opsi for insert to authenticated
-  with check (public.peran() = 'ketua');
+  with check (public.peran() in ('ketua','sekretaris'));
 
 -- Suara: setiap orang hanya melihat pilihannya sendiri (rahasia).
 -- Jumlah suara diambil lewat fungsi hasil_polling().
@@ -259,11 +259,11 @@ create policy lapor_buat on public.lapor for insert to authenticated
   with check (user_id = auth.uid() and rumah = public.rumah_saya() and pelapor = public.nama_saya()
               and status = 'Baru');
 create policy lapor_status on public.lapor for update to authenticated
-  using (public.peran() = 'ketua') with check (public.peran() = 'ketua');
+  using (public.peran() in ('ketua','sekretaris')) with check (public.peran() in ('ketua','sekretaris'));
 
 -- Buku tamu: tuan rumah melihat tamunya; Ketua RT dan satpam melihat semua.
 create policy tamu_lihat on public.tamu for select to authenticated
-  using (public.peran() in ('ketua','satpam') or rumah = public.rumah_saya());
+  using (public.peran() in ('ketua','sekretaris','satpam') or rumah = public.rumah_saya());
 create policy tamu_lapor on public.tamu for insert to authenticated
   with check (user_id = auth.uid() and rumah = public.rumah_saya() and tuan = public.nama_saya());
 
@@ -295,13 +295,13 @@ begin
 end
 $$;
 
--- Ketua RT mencatat pembayaran tunai.
+-- Ketua RT atau Bendahara mencatat pembayaran tunai.
 create function public.catat_tunai(p_rumah text, p_bulan text) returns void
   language plpgsql security definer set search_path = public as
 $$
 declare v_jumlah integer;
 begin
-  if peran() is distinct from 'ketua' then raise exception 'Hanya Ketua RT'; end if;
+  if peran() is null or peran() not in ('ketua','bendahara') then raise exception 'Hanya Ketua RT atau Bendahara'; end if;
   update tagihan set lunas = true, metode = 'tunai', dibayar_pada = now()
    where rumah = p_rumah and bulan = p_bulan and not lunas
    returning jumlah into v_jumlah;
@@ -311,13 +311,13 @@ begin
 end
 $$;
 
--- Ketua RT membuat tagihan satu bulan untuk semua rumah yang punya kepala keluarga.
+-- Ketua RT atau Bendahara membuat tagihan satu bulan untuk semua rumah yang punya kepala keluarga.
 create function public.buat_tagihan(p_bulan text) returns integer
   language plpgsql security definer set search_path = public as
 $$
 declare v_total integer; v_n integer;
 begin
-  if peran() is distinct from 'ketua' then raise exception 'Hanya Ketua RT'; end if;
+  if peran() is null or peran() not in ('ketua','bendahara') then raise exception 'Hanya Ketua RT atau Bendahara'; end if;
   select coalesce(sum(jumlah), 0) into v_total from iuran_jenis;
   if v_total = 0 then raise exception 'Jenis iuran belum diisi'; end if;
   insert into tagihan (rumah, bulan, jumlah)

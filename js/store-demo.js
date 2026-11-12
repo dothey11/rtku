@@ -6,6 +6,8 @@ window.DemoStore = function () {
   const USERS = {
     warga:  { nama: "Sari Wulandari", rumah: "C-12" },
     ketua:  { nama: "Hendra Wijaya",  rumah: "A-01" },
+    bendahara:  { nama: "Fitri Handayani", rumah: "B-05" },
+    sekretaris: { nama: "Agus Santoso",    rumah: "A-02" },
     satpam: { nama: "Ujang Suryana",  rumah: "Pos Jaga" }
   };
   const BULAN = "2026-11";
@@ -104,7 +106,7 @@ window.DemoStore = function () {
       D.warga.filter(w => w.kk).forEach(w => { if (!D.tagihan.some(t => t.rumah === w.rumah && t.bulan === bulan)) D.tagihan.push({ rumah: w.rumah, bulan, jumlah: total, lunas: false, metode: null }); });
       save();
     },
-    async keluar_kas(d) { D.kas.push({ tgl: d.tgl, ket: d.ket, jenis: "keluar", jml: d.jml }); save(); },
+    async catatKas(d) { D.kas.push({ tgl: d.tgl, ket: d.ket, jenis: d.jenis, jml: d.jml }); save(); },
 
     async ajukanSurat(d) { const u = me(); D.surat.push({ id: nid(), jenis: d.jenis, keperluan: d.keperluan, pemohon: u.nama, rumah: u.rumah, waktu: kini(), status: "Menunggu" }); save(); },
     async setujuiSurat(id) {
