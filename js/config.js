@@ -6,6 +6,6 @@
 // keamanan data dijaga oleh aturan Row Level Security di database/schema.sql.
 // JANGAN PERNAH menaruh "service_role key" di file ini.
 window.RTKU_CONFIG = {
-  SUPABASE_URL: "",
-  SUPABASE_ANON_KEY: ""
+  SUPABASE_URL: "https://agfeqoewiwxksqeqylsa.supabase.co",
+  SUPABASE_ANON_KEY: "sb_publishable__ID36-qe4zeGfm8H7_MXow_RAqjizf2"
 };
