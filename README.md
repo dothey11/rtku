@@ -13,9 +13,9 @@ js/config.js             alamat dan kunci Supabase (isi sendiri)
 js/app.js                tampilan dan aksi
 js/store-supabase.js     baca/tulis ke database
 js/store-demo.js         data contoh untuk mode demo
-database/schema.sql      tabel, aturan akses (RLS), fungsi, realtime, storage
+database/schema.sql      tabel, peran dan izin, aturan akses (RLS), fungsi, realtime, storage
 database/seed.sql        data awal contoh
-database/migrasi-002-peran-pengurus.sql   pembaruan untuk database lama: peran Bendahara dan Sekretaris
+database/migrasi-003-peran-dinamis.sql   pembaruan untuk database lama: peran dan izin dinamis
 ```
 
 ## Dua mode
@@ -49,7 +49,7 @@ database/migrasi-002-peran-pengurus.sql   pembaruan untuk database lama: peran B
    where id = (select id from auth.users where email = 'email-anda@contoh.com');
    ```
 
-7. Akun warga dan satpam berikutnya mendaftar sendiri, lalu Ketua RT memverifikasinya di menu **Warga & Tamu > Akun pengguna**. Akun yang belum diverifikasi tidak bisa melihat data apa pun.
+7. Akun berikutnya mendaftar sendiri, lalu Ketua RT menyetujuinya dan memilih perannya di menu **Pengaturan > Akun pengguna**. Akun yang belum diverifikasi tidak bisa melihat data apa pun.
 
 ## Cara menayangkan aplikasi
 
@@ -61,29 +61,59 @@ Setelah punya alamat, masukkan alamat itu di Supabase **Authentication > URL Con
 
 Untuk mencoba di komputer sendiri: `npx serve .` lalu buka alamat yang ditampilkan.
 
-## Hak akses per peran
+## Peran dan izin
 
-Ada lima peran: **warga**, **ketua**, **bendahara**, **sekretaris**, dan **satpam**. Ketua RT, Bendahara, dan Sekretaris disebut pengurus.
+Hak akses tidak ditulis mati di kode. Database menyimpannya di dua tabel:
 
-| Data | Warga | Bendahara | Sekretaris | Ketua RT | Satpam |
-|---|---|---|---|---|---|
-| Laporan kas | lihat | lihat, catat pemasukan dan pengeluaran | lihat | lihat, catat | lihat |
-| Tagihan iuran | rumah sendiri, bayar | semua, catat tunai, buat tagihan bulanan | rumah sendiri, bayar | semua, catat tunai, buat tagihan | tidak |
-| Surat | ajukan, lihat milik sendiri | ajukan, lihat milik sendiri | lihat semua, ajukan | lihat semua, setujui/tolak | tidak |
-| SOS | kirim, lihat milik sendiri | kirim, lihat semua, tangani | kirim, lihat semua, tangani | kirim, lihat semua, tangani | lihat semua, tangani |
-| Pengumuman, polling | lihat, memilih | lihat, memilih | buat | buat | lihat, memilih |
-| Lapor RT | lihat, buat | lihat, buat | ubah status | ubah status | lihat, buat |
-| Data warga | rumah sendiri | lihat semua (di database) | lihat semua, tambah | lihat semua, tambah | tidak |
-| Buku tamu | rumah sendiri, lapor | rumah sendiri, lapor | lihat semua | lihat semua | lihat semua |
-| Akun pengguna | profil sendiri | profil sendiri | profil sendiri | verifikasi, ganti peran | profil sendiri |
+| Tabel | Isi |
+|---|---|
+| `peran` | Daftar peran: kode, nama, dan tanda `bawaan` |
+| `peran_izin` | Izin yang dimiliki tiap peran, satu baris per pasangan peran dan izin |
 
-Menyetujui surat hanya bisa dilakukan Ketua RT, karena surat terbit atas namanya. Memverifikasi akun dan mengganti peran juga hanya Ketua RT, lewat menu **Warga & Tamu > Akun pengguna**: pilih peran, lalu klik Verifikasi atau Simpan peran.
+Semua aturan akses di database memanggil fungsi `punya_izin('...')`, yang membaca kedua tabel itu. Mengubah isi tabel langsung mengubah hak akses, tanpa mengubah kode.
 
-Aturan ini ditegakkan di database (`database/schema.sql` bagian 3), bukan hanya di tampilan.
+Cara mengaturnya dari aplikasi: menu **Pengaturan** (terlihat oleh peran berizin `akun.kelola`).
 
-### Database yang sudah terpasang sebelum ada Bendahara dan Sekretaris
+- **Akun pengguna:** pendaftar baru muncul di sini. Pilih perannya di kotak pilihan, lalu klik **Setujui dengan peran ini**. Peran akun yang sudah aktif bisa diganti dengan **Simpan peran**.
+- **Peran dan izin:** tabel centang, baris izin dan kolom peran. Centang atau hapus centang untuk mengubah izin; berlaku seketika.
+- **Tambah peran:** misalnya Humas atau Koordinator Keamanan. Peran baru belum punya izin sampai dicentang.
 
-Jalankan `database/migrasi-002-peran-pengurus.sql` satu kali di SQL Editor. Database baru yang dibuat dari `schema.sql` terbaru tidak memerlukannya.
+Daftar izin:
+
+| Kode izin | Arti |
+|---|---|
+| `rumah` | Penghuni rumah: bayar iuran, ajukan surat, lapor tamu, tombol SOS |
+| `kas.kelola` | Catat pemasukan dan pengeluaran, buat tagihan, catat bayar tunai |
+| `surat.lihat` | Lihat semua permohonan surat |
+| `surat.putuskan` | Setujui atau tolak surat |
+| `info.kelola` | Buat pengumuman dan polling |
+| `lapor.kelola` | Ubah status laporan warga |
+| `warga.lihat` | Lihat data semua warga |
+| `warga.kelola` | Tambah, ubah, dan hapus data warga |
+| `tamu.lihat` | Lihat buku tamu semua rumah |
+| `sos.tangani` | Terima dan tangani sinyal darurat |
+| `akun.kelola` | Setujui akun, atur peran dan izin |
+
+Izin awal saat database dipasang:
+
+| Peran | Izin |
+|---|---|
+| Warga | `rumah` |
+| Ketua RT | semua |
+| Bendahara | `rumah`, `kas.kelola`, `warga.lihat`, `sos.tangani` |
+| Sekretaris | `rumah`, `surat.lihat`, `info.kelola`, `lapor.kelola`, `warga.lihat`, `warga.kelola`, `tamu.lihat`, `sos.tangani` |
+| Satpam | `tamu.lihat`, `sos.tangani` |
+
+Ketentuan tetap:
+
+- Peran `ketua` selalu memiliki semua izin, supaya pengaturan tidak pernah terkunci.
+- Peran `warga` dan `ketua` tidak bisa dihapus. `warga` adalah peran setiap akun baru.
+- Peran yang masih dipakai akun tidak bisa dihapus.
+- Daftar kode izin sendiri tetap: menambah jenis izin baru berarti menambah fitur, dan itu perlu perubahan kode.
+
+### Database yang sudah terpasang sebelumnya
+
+Jalankan `database/migrasi-003-peran-dinamis.sql` satu kali di SQL Editor. File ini berlaku untuk database versi mana pun sebelumnya dan aman dijalankan ulang. Data yang ada tidak diubah. Database baru yang dibuat dari `schema.sql` terbaru tidak memerlukannya.
 
 ## Yang belum ada
 
@@ -96,4 +126,4 @@ Jalankan `database/migrasi-002-peran-pengurus.sql` satu kali di SQL Editor. Data
 
 ## Status pengujian
 
-Skema, migrasi, aturan akses kelima peran, dan fungsi database diuji pada PostgreSQL 16. Tampilan diuji dalam mode demo dan dengan klien Supabase tiruan. Sambungan ke proyek Supabase sungguhan belum diuji, jadi coba semua alur setelah langkah pemasangan di atas.
+Skema, migrasi (dari tiap versi sebelumnya), aturan akses berbasis izin, dan fungsi database diuji pada PostgreSQL 16. Tampilan diuji dalam mode demo dan dengan klien Supabase tiruan. Sambungan ke proyek Supabase sungguhan belum diuji, jadi coba semua alur setelah langkah pemasangan di atas.

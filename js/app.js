@@ -7,7 +7,21 @@
   const store = live ? window.SupaStore(cfg) : window.DemoStore();
 
   let S = null, masuk = false, galat = "", infoTab = "pengumuman", filterWarga = "Semua", fotoFile = null, authTab = "masuk";
-  const LABEL = { warga: "Warga", ketua: "Ketua RT", bendahara: "Bendahara", sekretaris: "Sekretaris", satpam: "Satpam" };
+  // Daftar izin yang dikenal aplikasi. Peran mana punya izin apa disimpan di database (tabel peran_izin).
+  const IZIN = [
+    ["rumah", "Penghuni rumah: bayar iuran, ajukan surat, lapor tamu, tombol SOS"],
+    ["kas.kelola", "Kelola iuran dan kas: catat pemasukan dan pengeluaran, tagihan, bayar tunai"],
+    ["surat.lihat", "Lihat semua permohonan surat"],
+    ["surat.putuskan", "Setujui atau tolak surat"],
+    ["info.kelola", "Buat pengumuman dan polling"],
+    ["lapor.kelola", "Ubah status laporan warga"],
+    ["warga.lihat", "Lihat data semua warga"],
+    ["warga.kelola", "Tambah, ubah, dan hapus data warga"],
+    ["tamu.lihat", "Lihat buku tamu semua rumah"],
+    ["sos.tangani", "Terima dan tangani sinyal darurat"],
+    ["akun.kelola", "Setujui akun, atur peran dan izin"]
+  ];
+  const STATUS_WARGA = ["Pemilik", "Penyewa", "Kos", "ART"];
   const JENIS_SURAT = ["Surat Pengantar KTP", "Surat Keterangan Domisili", "Surat Keterangan Tidak Mampu", "Surat Pengantar Kartu Keluarga", "Surat Pengantar SKCK"];
   const ICON = {
     beranda: '<path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>',
@@ -15,6 +29,7 @@
     surat: '<path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5M9 13h7M9 17h5"/>',
     darurat: '<path d="M12 3l9 16H3z"/><path d="M12 10v4M12 17v.5"/>',
     info: '<path d="M4 10v4h3l6 4V6l-6 4z"/><path d="M17 9a4 4 0 0 1 0 6"/>',
+    pengaturan: '<circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/>',
     warga: '<circle cx="9" cy="8" r="3"/><path d="M3 20a6 6 0 0 1 12 0"/><circle cx="17" cy="9" r="2.5"/><path d="M16 14a5 5 0 0 1 5 5"/>'
   };
   const icon = n => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON[n]}</svg>`;
@@ -29,13 +44,14 @@
   const hariIni = () => { const d = new Date(), p = n => String(n).padStart(2, "0"); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`; };
   const baru = (a, k) => a.slice().sort((x, y) => String(y[k]).localeCompare(String(x[k])));
   const me = () => S.me;
-  const isKetua = () => S.me.peran === "ketua";
-  const isSatpam = () => S.me.peran === "satpam";
-  const isWarga = () => S.me.peran === "warga";
-  // Wewenang per peran. Aturan yang sama ditegakkan di database (schema.sql bagian 3).
-  const bisaKas = () => ["ketua", "bendahara"].includes(S.me.peran);        // iuran, tagihan, kas
-  const bisaAdmin = () => ["ketua", "sekretaris"].includes(S.me.peran);     // surat masuk, pengumuman, polling, lapor, data warga
-  const petugas = () => S.me.peran !== "warga";                             // menerima dan menangani SOS
+  // Wewenang dibaca dari database: S.izin = daftar izin milik peran akun ini.
+  const bisa = k => S.izin.includes(k);
+  const namaPeran = k => { const p = S.peranList.find(x => x.kode === k); return p ? p.nama : k; };
+  const bisaKas = () => bisa("kas.kelola");
+  const lihatSurat = () => bisa("surat.lihat") || bisa("surat.putuskan");
+  const lihatWarga = () => bisa("warga.lihat") || bisa("warga.kelola");
+  const petugas = () => bisa("sos.tangani");
+  const tanpaRumah = () => !bisa("rumah");   // misalnya satpam: tanpa iuran, surat, dan tombol SOS
   const total = () => S.iuran.reduce((a, i) => a + i.jumlah, 0);
   const saldo = () => S.kas.reduce((a, k) => a + (k.jenis === "masuk" ? k.jml : -k.jml), 0);
   const kkList = () => S.warga.filter(w => w.kk);
@@ -45,15 +61,18 @@
 
   function menu() {
     const m = [["beranda", "Beranda"]];
-    if (!isSatpam()) m.push(["iuran", "Iuran & Kas"], ["surat", "Surat"]);
-    m.push(["darurat", "Darurat"], ["info", "Informasi"], ["warga", bisaAdmin() ? "Warga & Tamu" : isSatpam() ? "Buku Tamu" : "Keluarga & Tamu"]);
+    if (bisa("rumah") || bisaKas()) m.push(["iuran", "Iuran & Kas"]);
+    if (bisa("rumah") || lihatSurat()) m.push(["surat", "Surat"]);
+    m.push(["darurat", "Darurat"], ["info", "Informasi"], ["warga", lihatWarga() ? "Warga & Tamu" : tanpaRumah() ? "Buku Tamu" : "Keluarga & Tamu"]);
+    if (bisa("akun.kelola")) m.push(["pengaturan", "Pengaturan"]);
     return m;
   }
   function currentView() { const h = (location.hash || "").slice(1); return menu().some(m => m[0] === h) ? h : "beranda"; }
   function badge(v) {
     if (v === "darurat") return S.sos.filter(x => x.status !== "Selesai").length;
-    if (v === "surat" && bisaAdmin()) return S.surat.filter(x => x.status === "Menunggu").length;
-    if (v === "iuran" && !isSatpam()) return tagihanku().filter(t => !t.lunas).length;
+    if (v === "surat" && bisa("surat.putuskan")) return S.surat.filter(x => x.status === "Menunggu").length;
+    if (v === "iuran" && !tanpaRumah()) return tagihanku().filter(t => !t.lunas).length;
+    if (v === "pengaturan") return S.akun.filter(a => !a.aktif).length;
     return 0;
   }
 
@@ -72,15 +91,15 @@
       return;
     }
     renderKerangka();
-    $("view").innerHTML = ({ beranda: vBeranda, iuran: vIuran, surat: vSurat, darurat: vDarurat, info: vInfo, warga: vWarga })[currentView()]();
+    $("view").innerHTML = ({ beranda: vBeranda, iuran: vIuran, surat: vSurat, darurat: vDarurat, info: vInfo, warga: vWarga, pengaturan: vPengaturan })[currentView()]();
   }
   function renderKerangka() {
     const v = currentView(), u = me();
     $("whoName").textContent = u.nama;
-    $("whoSub").textContent = LABEL[u.peran] + " · " + u.rumah;
+    $("whoSub").textContent = namaPeran(u.peran) + " · " + u.rumah;
     $("roles").innerHTML = live
       ? `<button class="btn sm" data-act="keluar">Keluar</button>`
-      : `<div class="roles" role="group" aria-label="Lihat aplikasi sebagai">${Object.keys(LABEL).map(r => `<button data-act="role" data-v="${r}" aria-pressed="${u.peran === r}">${LABEL[r]}</button>`).join("")}</div>`;
+      : `<div class="roles" role="group" aria-label="Lihat aplikasi sebagai">${S.peranList.map(r => `<button data-act="role" data-v="${esc(r.kode)}" aria-pressed="${u.peran === r.kode}">${esc(r.nama)}</button>`).join("")}</div>`;
     $("foot").innerHTML = `<span class="small muted">${live ? "Tersambung ke database" : "Perumahan Griya Melati (contoh)"}</span>${live ? "" : `<button class="btn sm" data-act="reset">Kembalikan data contoh</button>`}`;
     $("nav").innerHTML = menu().map(([k, l]) => { const b = badge(k); return `<a href="#${k}" ${k === v ? 'aria-current="page"' : ""}>${icon(k)}<span>${l}</span>${b ? `<span class="dot">${b}</span>` : ""}</a>`; }).join("");
     $("bottom").innerHTML = menu().map(([k, l]) => `<a href="#${k}" ${k === v ? 'aria-current="page"' : ""}>${icon(k)}<span>${l.split(" ")[0]}</span></a>`).join("");
@@ -117,7 +136,7 @@
   // ---------- Beranda ----------
   function vBeranda() {
     const p = baru(S.pengumuman, "waktu")[0], tiles = [];
-    if (!isSatpam() && !bisaKas()) {
+    if (!tanpaRumah() && !bisaKas()) {
       const t = tagihanku().filter(x => !x.lunas);
       tiles.push(`<div class="card tile"><span class="lbl">Tagihan belum dibayar</span><span class="big num">${t.length ? rp(t.reduce((a, x) => a + x.jumlah, 0)) : "Lunas"}</span><a class="btn ${t.length ? "pri" : ""}" href="#iuran">${t.length ? "Bayar sekarang" : "Lihat riwayat"}</a></div>`);
     }
@@ -125,10 +144,10 @@
       const belum = S.tagihan.filter(t => t.bulan === S.bulan && !t.lunas).length;
       tiles.push(`<div class="card tile"><span class="lbl">Belum bayar ${namaBulan(S.bulan)}</span><span class="big num">${belum} rumah</span><a class="btn" href="#iuran">Kelola iuran</a></div>`);
     }
-    if (bisaAdmin()) {
+    if (lihatSurat()) {
       tiles.push(`<div class="card tile"><span class="lbl">Surat menunggu persetujuan</span><span class="big num">${S.surat.filter(x => x.status === "Menunggu").length}</span><a class="btn" href="#surat">Periksa permohonan</a></div>`);
     }
-    if (isSatpam()) {
+    if (tanpaRumah()) {
       tiles.push(`<div class="card tile"><span class="lbl">Sinyal darurat aktif</span><span class="big num">${S.sos.filter(x => x.status !== "Selesai").length}</span><a class="btn" href="#darurat">Buka darurat</a></div>`);
       tiles.push(`<div class="card tile"><span class="lbl">Tamu menginap tercatat</span><span class="big num">${S.tamu.length}</span><a class="btn" href="#warga">Buka buku tamu</a></div>`);
     } else {
@@ -136,7 +155,7 @@
     }
     tiles.push(`<div class="card tile"><span class="lbl">Laporan warga belum selesai</span><span class="big num">${S.lapor.filter(x => x.status !== "Selesai").length}</span><a class="btn" href="#info" data-act="tab" data-v="lapor">Lihat laporan</a></div>`);
     return `<div class="head"><div><h1>Selamat datang, ${esc(me().nama.split(" ")[0])}</h1><p class="muted">RT 04 / RW 07 · ${new Date().toLocaleDateString("id-ID", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}</p></div>
-      ${isSatpam() ? "" : `<a class="btn danger" href="#darurat">Tombol darurat</a>`}</div>
+      ${tanpaRumah() ? "" : `<a class="btn danger" href="#darurat">Tombol darurat</a>`}</div>
     <div class="grid">${tiles.join("")}</div>
     <div class="two">
       <div class="card"><div class="head"><h2>Pengumuman terbaru</h2><a class="btn sm" href="#info" data-act="tab" data-v="pengumuman">Semua</a></div>
@@ -203,19 +222,20 @@
 
   // ---------- Surat ----------
   function vSurat() {
-    const list = baru(bisaAdmin() ? S.surat : S.surat.filter(s => s.rumah === me().rumah), "waktu");
+    const semua = lihatSurat(), putus = bisa("surat.putuskan"), punyaRumah = bisa("rumah");
+    const list = baru(semua ? S.surat : S.surat.filter(x => x.rumah === me().rumah), "waktu");
     const rows = list.map(s => `<div class="row"><div class="grow"><b>${esc(s.jenis)}</b><p class="small">${esc(s.keperluan)}</p><p class="small muted">${esc(s.pemohon)} · ${esc(s.rumah)} · ${jam(s.waktu)}${s.nomor ? " · No. " + esc(s.nomor) : ""}${s.catatan ? " · Alasan: " + esc(s.catatan) : ""}</p></div>
-      <div class="acts">${statusPill(s.status)}${s.status === "Disetujui" ? `<button class="btn sm" data-act="surat-lihat" data-id="${s.id}">Lihat surat</button>` : ""}${isKetua() && s.status === "Menunggu" ? `<button class="btn pri sm" data-act="surat-setuju" data-id="${s.id}">Setujui</button><button class="btn sm" data-act="surat-tolak" data-id="${s.id}">Tolak</button>` : ""}</div></div>`).join("");
-    const form = isKetua() ? "" : `<div class="card"><h2>Ajukan surat</h2><form class="f" data-form="surat">
+      <div class="acts">${statusPill(s.status)}${s.status === "Disetujui" ? `<button class="btn sm" data-act="surat-lihat" data-id="${s.id}">Lihat surat</button>` : ""}${putus && s.status === "Menunggu" ? `<button class="btn pri sm" data-act="surat-setuju" data-id="${s.id}">Setujui</button><button class="btn sm" data-act="surat-tolak" data-id="${s.id}">Tolak</button>` : ""}</div></div>`).join("");
+    const form = punyaRumah ? `<div class="card"><h2>Ajukan surat</h2><form class="f" data-form="surat">
       <div class="fld"><label for="s-jenis">Jenis surat</label><select id="s-jenis" name="jenis">${JENIS_SURAT.map(j => `<option>${j}</option>`).join("")}</select></div>
       <div class="fld"><label for="s-kep">Keperluan</label><textarea id="s-kep" name="keperluan" required placeholder="Contoh: syarat pendaftaran sekolah"></textarea></div>
-      <button class="btn pri">Kirim permohonan</button></form><p class="small muted">Ketua RT menerima permohonan ini dan menyetujuinya dari aplikasi. Tidak perlu datang ke rumahnya.</p></div>`;
-    return `<div class="head"><div><h1>Surat-menyurat</h1><p class="muted">${isKetua() ? "Periksa dan setujui permohonan warga." : isSatpam() ? "" : "Ajukan surat pengantar tanpa keluar rumah. Persetujuan oleh Ketua RT."}</p></div></div>
-    <div class="${isKetua() ? "" : "two"}"><div class="card"><h2>${bisaAdmin() ? "Semua permohonan" : "Permohonan saya"}</h2><div class="list">${rows || `<p class="muted">Belum ada permohonan.</p>`}</div></div>${form}</div>`;
+      <button class="btn pri">Kirim permohonan</button></form><p class="small muted">Pengurus RT menerima permohonan ini dan menyetujuinya dari aplikasi. Tidak perlu datang ke rumahnya.</p></div>` : "";
+    return `<div class="head"><div><h1>Surat-menyurat</h1><p class="muted">${putus ? "Periksa dan putuskan permohonan warga." : semua ? "Pantau semua permohonan surat warga." : "Ajukan surat pengantar tanpa keluar rumah."}</p></div></div>
+    <div class="${form ? "two" : ""}"><div class="card"><h2>${semua ? "Semua permohonan" : "Permohonan saya"}</h2><div class="list">${rows || `<p class="muted">Belum ada permohonan.</p>`}</div></div>${form}</div>`;
   }
   function qrSvg(text) { try { if (typeof qrcode !== "function") return ""; const q = qrcode(0, "M"); q.addData(text); q.make(); return `<div class="qr">${q.createSvgTag({ cellSize: 3, margin: 2 })}</div>`; } catch (e) { return ""; } }
   function suratHtml(s) {
-    const ketua = S.akun.find(a => a.peran === "ketua") || (isKetua() ? me() : null);
+    const ketua = S.akun.find(a => a.peran === "ketua") || (me().peran === "ketua" ? me() : null);
     return `<div class="surat"><div class="kop"><b>RUKUN TETANGGA 04 / RUKUN WARGA 07</b></div>
       <div style="text-align:center"><b style="text-decoration:underline">${esc(s.jenis).toUpperCase()}</b><br>Nomor: ${esc(s.nomor)}</div>
       <p>Yang bertanda tangan di bawah ini, Ketua RT 04 / RW 07, menerangkan bahwa:</p>
@@ -226,8 +246,8 @@
 
   // ---------- Darurat ----------
   function vDarurat() {
-    const riwayat = baru(S.sos, "waktu").map(a => `<div class="row"><div class="grow"><b>${esc(a.jenis)}</b> · ${esc(a.rumah)}<p class="small muted">${esc(a.nama)} · ${jam(a.waktu)}${a.petugas ? " · Petugas: " + esc(a.petugas) : ""}</p></div><div class="acts">${statusPill(a.status)}${!isWarga() && a.status === "Aktif" ? `<button class="btn sm" data-act="sos-tangani" data-id="${a.id}">Saya tangani</button>` : ""}${!isWarga() && a.status === "Ditangani" ? `<button class="btn sm" data-act="sos-selesai" data-id="${a.id}">Selesai</button>` : ""}</div></div>`).join("");
-    const kiri = !isSatpam()
+    const riwayat = baru(S.sos, "waktu").map(a => `<div class="row"><div class="grow"><b>${esc(a.jenis)}</b> · ${esc(a.rumah)}<p class="small muted">${esc(a.nama)} · ${jam(a.waktu)}${a.petugas ? " · Petugas: " + esc(a.petugas) : ""}</p></div><div class="acts">${statusPill(a.status)}${petugas() && a.status === "Aktif" ? `<button class="btn sm" data-act="sos-tangani" data-id="${a.id}">Saya tangani</button>` : ""}${petugas() && a.status === "Ditangani" ? `<button class="btn sm" data-act="sos-selesai" data-id="${a.id}">Selesai</button>` : ""}</div></div>`).join("");
+    const kiri = !tanpaRumah()
       ? `<div class="card" style="align-items:center;text-align:center"><h2>Butuh bantuan segera?</h2><button class="sos" data-act="sos" aria-label="Kirim sinyal darurat">SOS</button>
           <p>Tekan tombol, pilih jenis keadaan, lalu kirim. Satpam dan pengurus RT menerima peringatan beserta alamat rumah <b>${esc(me().rumah)}</b>.${petugas() ? " Sinyal dari warga lain muncul sebagai bilah merah di atas." : ""}</p>
           <p class="small muted">Nomor penting: Polisi 110 · Pemadam 113 · Ambulans 118 / 119</p></div>`
@@ -241,18 +261,18 @@
     const t = infoTab, tabs = [["pengumuman", "Pengumuman"], ["polling", "Polling"], ["lapor", "Lapor RT"]];
     let body;
     if (t === "pengumuman") {
-      body = `<div class="${bisaAdmin() ? "two" : ""}"><div class="card"><div class="list">${baru(S.pengumuman, "waktu").map(p => `<div class="row"><div class="grow"><h3>${esc(p.judul)}</h3><p>${esc(p.isi)}</p><p class="small muted">${jam(p.waktu)} · ${esc(p.oleh)}</p></div></div>`).join("") || `<p class="muted">Belum ada pengumuman.</p>`}</div></div>
-        ${bisaAdmin() ? `<div class="card"><h2>Buat pengumuman</h2><form class="f" data-form="umum"><div class="fld"><label for="u-j">Judul</label><input id="u-j" name="judul" required></div><div class="fld"><label for="u-i">Isi</label><textarea id="u-i" name="isi" required></textarea></div><button class="btn pri">Terbitkan</button></form></div>` : ""}</div>`;
+      body = `<div class="${bisa("info.kelola") ? "two" : ""}"><div class="card"><div class="list">${baru(S.pengumuman, "waktu").map(p => `<div class="row"><div class="grow"><h3>${esc(p.judul)}</h3><p>${esc(p.isi)}</p><p class="small muted">${jam(p.waktu)} · ${esc(p.oleh)}</p></div></div>`).join("") || `<p class="muted">Belum ada pengumuman.</p>`}</div></div>
+        ${bisa("info.kelola") ? `<div class="card"><h2>Buat pengumuman</h2><form class="f" data-form="umum"><div class="fld"><label for="u-j">Judul</label><input id="u-j" name="judul" required></div><div class="fld"><label for="u-i">Isi</label><textarea id="u-i" name="isi" required></textarea></div><button class="btn pri">Terbitkan</button></form></div>` : ""}</div>`;
     } else if (t === "polling") {
-      body = `<div class="${bisaAdmin() ? "two" : ""}"><div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(260px,1fr))">${S.polling.map(q => {
+      body = `<div class="${bisa("info.kelola") ? "two" : ""}"><div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(260px,1fr))">${S.polling.map(q => {
         const tot = q.opsi.reduce((a, o) => a + o.n, 0), mine = q.pilihku;
         return `<div class="card"><h2>${esc(q.tanya)}</h2>${q.opsi.map(o => `<div><div class="head"><span>${esc(o.t)} ${mine === o.id ? pill("Pilihan Anda", "ok") : ""}</span><span class="num small muted">${o.n} suara · ${tot ? Math.round(o.n / tot * 100) : 0}%</span></div><div class="bar"><i style="width:${tot ? o.n / tot * 100 : 0}%"></i></div>${mine == null ? `<button class="btn sm" style="margin-top:6px" data-act="vote" data-id="${q.id}" data-v="${o.id}">Pilih ${esc(o.t)}</button>` : ""}</div>`).join("")}
           <p class="small muted">${mine == null ? "Satu suara per akun." : "Suara Anda sudah tercatat."} Total ${tot} suara.</p></div>`;
       }).join("") || `<div class="card"><p class="muted">Belum ada polling.</p></div>`}</div>
-        ${bisaAdmin() ? `<div class="card"><h2>Buat polling</h2><form class="f" data-form="poll"><div class="fld"><label for="p-t">Pertanyaan</label><input id="p-t" name="tanya" required></div><div class="fld"><label for="p-o">Pilihan, satu per baris</label><textarea id="p-o" name="opsi" required placeholder="Pilihan A&#10;Pilihan B"></textarea></div><button class="btn pri">Mulai polling</button></form></div>` : ""}</div>`;
+        ${bisa("info.kelola") ? `<div class="card"><h2>Buat polling</h2><form class="f" data-form="poll"><div class="fld"><label for="p-t">Pertanyaan</label><input id="p-t" name="tanya" required></div><div class="fld"><label for="p-o">Pilihan, satu per baris</label><textarea id="p-o" name="opsi" required placeholder="Pilihan A&#10;Pilihan B"></textarea></div><button class="btn pri">Mulai polling</button></form></div>` : ""}</div>`;
     } else {
       const next = { Baru: "Diproses", Diproses: "Selesai" };
-      body = `<div class="two"><div class="card"><h2>Laporan warga</h2><div class="list">${baru(S.lapor, "waktu").map(l => `<div class="row"><div class="grow"><b>${esc(l.judul)}</b> ${pill(l.kategori, "mute")}<p>${esc(l.ket)}</p>${l.foto ? `<img class="foto" src="${esc(l.foto)}" alt="Foto laporan ${esc(l.judul)}">` : ""}<p class="small muted">${esc(l.pelapor)} · ${esc(l.rumah)} · ${jam(l.waktu)}</p></div><div class="acts">${statusPill(l.status)}${bisaAdmin() && next[l.status] ? `<button class="btn sm" data-act="lapor-next" data-id="${l.id}">Tandai ${next[l.status].toLowerCase()}</button>` : ""}</div></div>`).join("") || `<p class="muted">Belum ada laporan.</p>`}</div></div>
+      body = `<div class="two"><div class="card"><h2>Laporan warga</h2><div class="list">${baru(S.lapor, "waktu").map(l => `<div class="row"><div class="grow"><b>${esc(l.judul)}</b> ${pill(l.kategori, "mute")}<p>${esc(l.ket)}</p>${l.foto ? `<img class="foto" src="${esc(l.foto)}" alt="Foto laporan ${esc(l.judul)}">` : ""}<p class="small muted">${esc(l.pelapor)} · ${esc(l.rumah)} · ${jam(l.waktu)}</p></div><div class="acts">${statusPill(l.status)}${bisa("lapor.kelola") && next[l.status] ? `<button class="btn sm" data-act="lapor-next" data-id="${l.id}">Tandai ${next[l.status].toLowerCase()}</button>` : ""}</div></div>`).join("") || `<p class="muted">Belum ada laporan.</p>`}</div></div>
         <div class="card"><h2>Buat laporan</h2><form class="f" data-form="lapor"><div class="fld"><label for="l-j">Judul</label><input id="l-j" name="judul" required placeholder="Contoh: lampu jalan mati"></div>
           <div class="fld"><label for="l-k">Kategori</label><select id="l-k" name="kategori"><option>Penerangan</option><option>Kebersihan</option><option>Jalan</option><option>Keamanan</option><option>Lainnya</option></select></div>
           <div class="fld"><label for="l-d">Keterangan dan lokasi</label><textarea id="l-d" name="ket" required></textarea></div>
@@ -265,34 +285,57 @@
 
   // ---------- Warga & Tamu ----------
   function vWarga() {
-    const tamuList = baru(bisaAdmin() || isSatpam() ? S.tamu : S.tamu.filter(t => t.rumah === me().rumah), "waktu");
-    const tamu = `<div class="card"><h2>${bisaAdmin() || isSatpam() ? "Buku tamu 1x24 jam" : "Tamu menginap di rumah saya"}</h2><div class="list">${tamuList.map(t => `<div class="row"><div class="grow"><b>${esc(t.nama)}</b> <span class="muted">dari ${esc(t.asal)}</span><p class="small muted">${esc(t.hubungan)} · menginap di ${esc(t.rumah)} (${esc(t.tuan)}) · datang ${tgl(String(t.datang))}</p></div><div class="acts">${pill(t.malam + " malam", "mute")}</div></div>`).join("") || `<p class="muted">Belum ada tamu yang dilaporkan.</p>`}</div></div>`;
-    const formTamu = `<div class="card"><h2>Lapor tamu menginap</h2><form class="f" data-form="tamu">
+    const semuaTamu = bisa("tamu.lihat"), kelola = bisa("warga.kelola"), punyaRumah = bisa("rumah");
+    const tamuList = baru(semuaTamu ? S.tamu : S.tamu.filter(t => t.rumah === me().rumah), "waktu");
+    const tamu = `<div class="card"><h2>${semuaTamu ? "Buku tamu 1x24 jam" : "Tamu menginap di rumah saya"}</h2><div class="list">${tamuList.map(t => `<div class="row"><div class="grow"><b>${esc(t.nama)}</b> <span class="muted">dari ${esc(t.asal)}</span><p class="small muted">${esc(t.hubungan)} · menginap di ${esc(t.rumah)} (${esc(t.tuan)}) · datang ${tgl(String(t.datang))}</p></div><div class="acts">${pill(t.malam + " malam", "mute")}</div></div>`).join("") || `<p class="muted">Belum ada tamu yang dilaporkan.</p>`}</div></div>`;
+    const formTamu = punyaRumah ? `<div class="card"><h2>Lapor tamu menginap</h2><form class="f" data-form="tamu">
       <div class="fld"><label for="t-n">Nama tamu</label><input id="t-n" name="nama" required></div>
       <div class="frow"><div class="fld"><label for="t-h">Hubungan</label><input id="t-h" name="hubungan" required placeholder="Contoh: saudara"></div><div class="fld"><label for="t-a">Kota asal</label><input id="t-a" name="asal" required></div></div>
       <div class="frow"><div class="fld"><label for="t-d">Tanggal datang</label><input id="t-d" name="datang" type="date" value="${hariIni()}" required></div><div class="fld"><label for="t-m">Lama menginap (malam)</label><input id="t-m" name="malam" type="number" min="1" max="60" value="1" required></div></div>
-      <button class="btn pri">Laporkan tamu</button></form></div>`;
-    if (isSatpam()) return `<div class="head"><div><h1>Buku Tamu</h1><p class="muted">Tamu menginap yang dilaporkan warga.</p></div></div>${tamu}`;
-    if (!bisaAdmin()) {
+      <button class="btn pri">Laporkan tamu</button></form></div>` : "";
+    if (!lihatWarga()) {
+      if (!punyaRumah) return `<div class="head"><div><h1>Buku Tamu</h1><p class="muted">Tamu menginap yang dilaporkan warga.</p></div></div>${tamu}`;
       const kel = S.warga.filter(w => w.rumah === me().rumah);
       return `<div class="head"><div><h1>Keluarga & Tamu</h1><p class="muted">Data rumah ${esc(me().rumah)} hanya terlihat oleh penghuni rumah ini dan pengurus RT.</p></div></div>
-      <div class="two"><div style="display:flex;flex-direction:column;gap:20px"><div class="card"><h2>Penghuni rumah ${esc(me().rumah)}</h2><div class="list">${kel.map(w => `<div class="row"><div class="grow"><b>${esc(w.nama)}</b><p class="small muted">${w.kk ? w.jiwa + " jiwa dalam KK · " : ""}${esc(w.hp)}</p></div>${pill(w.status, "mute")}</div>`).join("") || `<p class="muted">Data penghuni belum diisi pengurus RT.</p>`}</div></div>${tamu}</div>${formTamu}</div>`;
+      <div class="two"><div style="display:flex;flex-direction:column;gap:20px"><div class="card"><h2>Penghuni rumah ${esc(me().rumah)}</h2><div class="list">${kel.map(w => `<div class="row"><div class="grow"><b>${esc(w.nama)}</b><p class="small muted">${w.kk ? w.jiwa + " jiwa dalam KK · " : ""}${esc(w.hp)}</p></div>${pill(w.status, "mute")}</div>`).join("") || `<p class="muted">Data penghuni belum diisi pengurus RT.</p>`}</div>
+        <p class="small muted">Ada data yang keliru? Hubungi pengurus RT untuk memperbaikinya.</p></div>${tamu}</div>${formTamu}</div>`;
     }
-    const st = ["Pemilik", "Penyewa", "Kos", "ART"], jiwa = S.warga.reduce((a, w) => a + w.jiwa, 0);
+    const jiwa = S.warga.reduce((a, w) => a + w.jiwa, 0);
     const rows = S.warga.filter(w => filterWarga === "Semua" || w.status === filterWarga);
-    const akun = live && isKetua() ? `<div class="card"><div class="head"><h2>Akun pengguna</h2><span class="small muted">${S.akun.filter(a => !a.aktif).length} menunggu verifikasi</span></div><div class="list">${S.akun.map(a => `<div class="row"><div class="grow"><b>${esc(a.nama)}</b> · ${esc(a.rumah)}<p class="small muted">${LABEL[a.peran]} · daftar ${tgl(a.dibuat)}</p></div><div class="acts">${a.aktif ? pill("Aktif", "ok") : pill("Menunggu", "warn")}${a.id === me().id ? "" : `<select aria-label="Peran ${esc(a.nama)}" data-peran="${a.id}">${Object.keys(LABEL).map(r => `<option value="${r}" ${a.peran === r ? "selected" : ""}>${LABEL[r]}</option>`).join("")}</select><button class="btn pri sm" data-act="akun" data-uid="${a.id}" data-v="simpan">${a.aktif ? "Simpan peran" : "Verifikasi"}</button>${a.aktif ? `<button class="btn sm" data-act="akun" data-uid="${a.id}" data-v="nonaktif">Nonaktifkan</button>` : ""}`}</div></div>`).join("")}</div>
-      <p class="small muted">Pilih peran, lalu Verifikasi. Cocokkan nama dan nomor rumah dengan data warga lebih dulu. Akun yang diverifikasi bisa melihat data rumah tersebut.</p></div>` : "";
     return `<div class="head"><div><h1>Warga & Tamu</h1><p class="muted">Data demografi RT 04 dan buku tamu digital.</p></div></div>
     <div class="grid"><div class="card tile"><span class="lbl">Rumah berpenghuni</span><span class="big num">${kkList().length}</span></div><div class="card tile"><span class="lbl">Total jiwa</span><span class="big num">${jiwa}</span></div>
-      ${st.map(s => `<div class="card tile"><span class="lbl">${s}</span><span class="big num">${S.warga.filter(w => w.status === s).length}</span></div>`).join("")}</div>
-    ${akun}
-    <div class="card"><div class="head"><h2>Daftar warga</h2><div class="tabs" role="group" aria-label="Saring status">${["Semua", ...st].map(s => `<button data-act="filter" data-v="${s}" aria-pressed="${filterWarga === s}">${s}</button>`).join("")}</div></div>
-      <div class="tw"><table><thead><tr><th>Rumah</th><th>Nama</th><th>Status</th><th class="r">Jiwa</th><th>No. HP</th></tr></thead><tbody>${rows.map(w => `<tr><td><b>${esc(w.rumah)}</b></td><td>${esc(w.nama)}</td><td>${pill(w.status, "mute")}</td><td class="r num">${w.jiwa}</td><td class="num">${esc(w.hp)}</td></tr>`).join("")}</tbody></table></div></div>
-    <div class="two">${tamu}<div class="card"><h2>Tambah warga</h2><form class="f" data-form="warga">
-      <div class="frow"><div class="fld"><label for="w-r">Nomor rumah</label><input id="w-r" name="rumah" required placeholder="Contoh: B-06"></div><div class="fld"><label for="w-s">Status</label><select id="w-s" name="status">${st.map(s => `<option>${s}</option>`).join("")}</select></div></div>
-      <div class="fld"><label for="w-n">Nama lengkap</label><input id="w-n" name="nama" required></div>
-      <div class="frow"><div class="fld"><label for="w-j">Jumlah jiwa</label><input id="w-j" name="jiwa" type="number" min="1" value="1" required></div><div class="fld"><label for="w-h">No. HP</label><input id="w-h" name="hp" required></div></div>
-      <button class="btn pri">Simpan data warga</button></form></div></div>`;
+      ${STATUS_WARGA.map(s => `<div class="card tile"><span class="lbl">${s}</span><span class="big num">${S.warga.filter(w => w.status === s).length}</span></div>`).join("")}</div>
+    <div class="card"><div class="head"><h2>Daftar warga</h2><div class="tabs" role="group" aria-label="Saring status">${["Semua", ...STATUS_WARGA].map(s => `<button data-act="filter" data-v="${s}" aria-pressed="${filterWarga === s}">${s}</button>`).join("")}</div></div>
+      <div class="tw"><table><thead><tr><th>Rumah</th><th>Nama</th><th>Status</th><th class="r">Jiwa</th><th>No. HP</th>${kelola ? "<th>Ubah data</th>" : ""}</tr></thead><tbody>${rows.map(w => `<tr><td><b>${esc(w.rumah)}</b></td><td>${esc(w.nama)} ${w.kk ? pill("Kepala keluarga", "ok") : ""}</td><td>${pill(w.status, "mute")}</td><td class="r num">${w.jiwa}</td><td class="num">${esc(w.hp)}</td>${kelola ? `<td><button class="btn sm" data-act="warga-ubah" data-id="${w.id}">Ubah</button> <button class="btn sm" data-act="warga-hapus" data-id="${w.id}">Hapus</button></td>` : ""}</tr>`).join("") || `<tr><td colspan="6" class="muted">Tidak ada data.</td></tr>`}</tbody></table></div>
+      ${kelola ? "" : `<p class="small muted">Peran Anda hanya bisa melihat data warga.</p>`}</div>
+    <div class="two">${tamu}<div style="display:flex;flex-direction:column;gap:20px">${kelola ? `<div class="card"><h2>Tambah warga</h2><form class="f" data-form="warga">${fieldWarga("w", {})}
+      <button class="btn pri">Simpan data warga</button></form></div>` : ""}${formTamu}</div></div>`;
+  }
+  // Isian data warga, dipakai form tambah (awalan id "w") dan form ubah (awalan id "e").
+  function fieldWarga(px, w) {
+    return `<div class="frow"><div class="fld"><label for="${px}-r">Nomor rumah</label><input id="${px}-r" name="rumah" required placeholder="Contoh: B-06" value="${esc(w.rumah || "")}"></div><div class="fld"><label for="${px}-s">Status</label><select id="${px}-s" name="status">${STATUS_WARGA.map(s => `<option ${w.status === s ? "selected" : ""}>${s}</option>`).join("")}</select></div></div>
+      <div class="fld"><label for="${px}-n">Nama lengkap</label><input id="${px}-n" name="nama" required value="${esc(w.nama || "")}"></div>
+      <div class="frow"><div class="fld"><label for="${px}-j">Jumlah jiwa</label><input id="${px}-j" name="jiwa" type="number" min="1" value="${w.jiwa || 1}" required></div><div class="fld"><label for="${px}-h">No. HP</label><input id="${px}-h" name="hp" required value="${esc(w.hp || "")}"></div></div>
+      ${px === "e" ? `<label class="opt"><input type="checkbox" name="kk" ${w.kk ? "checked" : ""}> Kepala keluarga (penanggung iuran rumah ini)</label>` : ""}`;
+  }
+
+  // ---------- Pengaturan: akun, peran, dan izin ----------
+  function vPengaturan() {
+    const pilihPeran = (id, kini) => `<select aria-label="Peran" data-peran="${id}">${S.peranList.map(p => `<option value="${esc(p.kode)}" ${kini === p.kode ? "selected" : ""}>${esc(p.nama)}</option>`).join("")}</select>`;
+    const daftar = S.akun.slice().sort((a, b) => (a.aktif - b.aktif) || String(b.dibuat).localeCompare(String(a.dibuat)));
+    const akun = live
+      ? `<div class="card"><div class="head"><h2>Akun pengguna</h2><span class="small muted">${S.akun.filter(a => !a.aktif).length} menunggu persetujuan</span></div>
+          <div class="list">${daftar.map(a => `<div class="row"><div class="grow"><b>${esc(a.nama)}</b> · rumah ${esc(a.rumah)}<p class="small muted">${a.aktif ? "Peran: " + esc(namaPeran(a.peran)) : "Mendaftar " + tgl(a.dibuat) + ", belum disetujui"}</p></div>
+            <div class="acts">${a.aktif ? pill("Aktif", "ok") : pill("Menunggu", "warn")}${a.id === me().id ? pill("Akun Anda", "mute") : `<span class="small">Peran:</span>${pilihPeran(a.id, a.peran)}<button class="btn pri sm" data-act="akun" data-uid="${a.id}" data-v="simpan">${a.aktif ? "Simpan peran" : "Setujui dengan peran ini"}</button>${a.aktif ? `<button class="btn sm" data-act="akun" data-uid="${a.id}" data-v="nonaktif">Nonaktifkan</button>` : ""}`}</div></div>`).join("")}</div>
+          <p class="small muted">Pilih peran di kotak pilihan, lalu klik tombolnya. Cocokkan nama dan nomor rumah dengan data warga lebih dulu: akun yang disetujui bisa melihat data rumah tersebut. Peran bisa diganti kapan saja dari sini.</p></div>`
+      : `<div class="card"><h2>Akun pengguna</h2><p class="muted">Mode demo tidak memakai akun login. Setelah tersambung ke database, pendaftar baru muncul di sini untuk disetujui dan diberi peran.</p></div>`;
+    const matriks = `<div class="card"><div class="head"><h2>Peran dan izin</h2><span class="small muted">Centang untuk memberi izin. Berlaku seketika.</span></div>
+      <div class="tw"><table><thead><tr><th>Izin</th>${S.peranList.map(p => `<th style="text-align:center">${esc(p.nama)}${p.bawaan ? "" : `<br><button class="btn sm" data-act="peran-hapus" data-v="${esc(p.kode)}">Hapus</button>`}</th>`).join("")}</tr></thead>
+      <tbody>${IZIN.map(([k, ket]) => `<tr><td style="white-space:normal;min-width:220px">${ket}</td>${S.peranList.map(p => `<td style="text-align:center"><input type="checkbox" aria-label="${esc(p.nama)}: ${ket}" data-ip="${esc(p.kode)}" data-ik="${k}" ${p.kode === "ketua" || p.izin.includes(k) ? "checked" : ""} ${p.kode === "ketua" ? "disabled" : ""}></td>`).join("")}</tr>`).join("")}</tbody></table></div>
+      <p class="small muted">Ketua RT selalu memiliki semua izin, supaya pengaturan ini tidak pernah terkunci. Peran Warga dan Ketua RT tidak bisa dihapus.</p></div>`;
+    const tambah = `<div class="card"><h2>Tambah peran</h2><form class="f" data-form="peran"><div class="fld"><label for="pr-n">Nama peran</label><input id="pr-n" name="nama" required maxlength="30" placeholder="Contoh: Humas, Ketua Pemuda, Koordinator Keamanan"></div><button class="btn pri">Tambah peran</button></form>
+      <p class="small muted">Peran baru belum punya izin apa pun. Centang izinnya di tabel, lalu berikan peran itu ke akun di daftar Akun pengguna.</p></div>`;
+    return `<div class="head"><div><h1>Pengaturan</h1><p class="muted">Setujui akun baru, tentukan perannya, dan atur izin tiap peran.</p></div></div>${akun}${matriks}<div class="two">${tambah}<div></div></div>`;
   }
 
   // ---------- modal, toast, pemuatan ----------
@@ -362,7 +405,23 @@
     if (act === "sos-selesai") { const a = S.sos.find(x => x.id === id); aksi(() => store.sosStatus(id, "Selesai", (a && a.petugas) || me().nama), "Sinyal darurat ditutup"); return; }
     if (act === "vote") { aksi(() => store.vote(id, Number(v)), "Suara Anda tercatat"); return; }
     if (act === "lapor-next") { const l = S.lapor.find(x => x.id === id), n = l && { Baru: "Diproses", Diproses: "Selesai" }[l.status]; if (n) aksi(() => store.laporStatus(id, n), "Status laporan diperbarui"); return; }
-    if (act === "akun") { const uid = el.dataset.uid; const sel = document.querySelector(`select[data-peran="${uid}"]`); aksi(() => store.aturAkun(uid, v === "nonaktif" ? { aktif: false } : { aktif: true, peran: sel ? sel.value : "warga" }), v === "nonaktif" ? "Akun dinonaktifkan" : "Peran akun disimpan"); return; }
+    if (act === "akun") {
+      const uid = el.dataset.uid, sel = document.querySelector(`select[data-peran="${uid}"]`), peran = sel ? sel.value : "warga";
+      aksi(() => store.aturAkun(uid, v === "nonaktif" ? { aktif: false } : { aktif: true, peran }), v === "nonaktif" ? "Akun dinonaktifkan" : `Akun aktif sebagai ${namaPeran(peran)}`); return;
+    }
+    if (act === "warga-ubah") {
+      const w = S.warga.find(x => x.id === id); if (!w) return;
+      modal(`<h2>Ubah data warga</h2><form class="f" data-form="warga-ubah" data-id="${id}">${fieldWarga("e", w)}<div style="display:flex;gap:8px;justify-content:flex-end"><button type="button" class="btn" data-act="tutup">Batal</button><button class="btn pri">Simpan perubahan</button></div></form>`); return;
+    }
+    if (act === "warga-hapus") {
+      const w = S.warga.find(x => x.id === id); if (!w) return;
+      modal(`<h2>Hapus data warga?</h2><p><b>${esc(w.nama)}</b>, rumah ${esc(w.rumah)} (${esc(w.status)}).</p><p class="small muted">${w.kk ? "Ia tercatat sebagai kepala keluarga. Setelah dihapus, rumah ini tidak mendapat tagihan baru sampai ada kepala keluarga lain. " : ""}Riwayat tagihan, surat, dan tamu rumah ini tetap tersimpan. Penghapusan tidak bisa dibatalkan.</p><div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn" data-act="tutup">Batal</button><button class="btn danger" data-act="warga-hapus-ya" data-id="${id}">Hapus</button></div>`); return;
+    }
+    if (act === "warga-hapus-ya") { modal(""); aksi(() => store.hapusWarga(id), "Data warga dihapus"); return; }
+    if (act === "peran-hapus") {
+      modal(`<h2>Hapus peran ${esc(namaPeran(v))}?</h2><p class="small muted">Semua izin peran ini ikut terhapus. Peran yang masih dipakai akun tidak bisa dihapus.</p><div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn" data-act="tutup">Batal</button><button class="btn danger" data-act="peran-hapus-ya" data-v="${esc(v)}">Hapus peran</button></div>`); return;
+    }
+    if (act === "peran-hapus-ya") { modal(""); aksi(() => store.hapusPeran(v), "Peran dihapus"); return; }
   });
 
   // ---------- aksi form ----------
@@ -399,9 +458,21 @@
     if (k === "lapor") { const file = fotoFile; fotoFile = null; aksi(() => store.lapor(rapi({ judul: d.judul, kategori: d.kategori, ket: d.ket, file })), "Laporan terkirim ke pengurus RT"); return; }
     if (k === "tamu") { aksi(() => store.tamu(rapi({ nama: d.nama, hubungan: d.hubungan, asal: d.asal, datang: d.datang, malam: Math.min(60, Math.max(1, Number(d.malam) || 1)) })), "Tamu tercatat di buku tamu RT"); return; }
     if (k === "warga") { aksi(() => store.tambahWarga(rapi({ rumah: d.rumah.trim().toUpperCase(), nama: d.nama, status: d.status, jiwa: Math.max(1, Number(d.jiwa) || 1), hp: d.hp })), "Data warga disimpan"); return; }
+    if (k === "warga-ubah") {
+      const ubah = rapi({ rumah: d.rumah.trim().toUpperCase(), nama: d.nama, status: d.status, jiwa: Math.max(1, Number(d.jiwa) || 1), hp: d.hp, kk: d.kk === "on" });
+      modal(""); aksi(() => store.ubahWarga(Number(f.dataset.id), ubah), "Perubahan data warga disimpan"); return;
+    }
+    if (k === "peran") {
+      const nama = d.nama.trim(), kode = nama.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+      if (!/^[a-z][a-z0-9_]{1,29}$/.test(kode)) { toast("Nama peran harus diawali huruf dan minimal dua karakter"); return; }
+      if (S.peranList.some(p => p.kode === kode)) { toast("Peran dengan nama itu sudah ada"); return; }
+      aksi(() => store.tambahPeran({ kode, nama }), `Peran ${nama} ditambahkan. Centang izinnya di tabel.`); return;
+    }
   });
 
   document.addEventListener("change", e => {
+    const c = e.target;
+    if (c.dataset && c.dataset.ik) { if (S && bisa("akun.kelola")) aksi(() => store.setIzin(c.dataset.ip, c.dataset.ik, c.checked), "Izin diperbarui"); return; }
     if (e.target.id !== "l-f") return; fotoFile = (e.target.files && e.target.files[0]) || null;
     const p = $("fotoPrev"); if (!p) return; p.innerHTML = "";
     if (fotoFile) { const r = new FileReader(); r.onload = () => { p.innerHTML = `<img class="foto" src="${r.result}" alt="Pratinjau foto laporan">`; }; r.readAsDataURL(fotoFile); }

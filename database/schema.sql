@@ -11,7 +11,7 @@ create table public.profiles (
   id      uuid primary key references auth.users(id) on delete cascade,
   nama    text not null,
   rumah   text not null default '-',
-  peran   text not null default 'warga' check (peran in ('warga','ketua','bendahara','sekretaris','satpam')),
+  peran   text not null default 'warga',   -- merujuk ke tabel peran (lihat bagian 3)
   aktif   boolean not null default false,
   dibuat  timestamptz not null default now()
 );
@@ -168,8 +168,80 @@ create table public.tamu (
   waktu     timestamptz not null default now()
 );
 
--- ---------- 3. Aturan akses (Row Level Security) ----------
+-- ---------- 3. Peran dan izin (dinamis) ----------
+-- Hak akses TIDAK ditulis mati di kode. Setiap peran punya daftar izin di tabel
+-- peran_izin. Pengurus yang berizin 'akun.kelola' bisa menambah peran dan mengubah
+-- izinnya dari aplikasi (menu Pengaturan) tanpa menyentuh SQL.
+create table if not exists public.peran (
+  kode    text primary key check (kode ~ '^[a-z][a-z0-9_]{1,29}$'),
+  nama    text not null,
+  bawaan  boolean not null default false     -- peran bawaan tidak bisa dihapus
+);
+
+create table if not exists public.peran_izin (
+  peran  text not null references public.peran(kode) on update cascade on delete cascade,
+  izin   text not null check (izin in (
+           'rumah',           -- penghuni rumah: bayar iuran, ajukan surat, lapor tamu, tombol SOS
+           'kas.kelola',      -- catat pemasukan/pengeluaran, tagihan, bayar tunai, jenis iuran
+           'surat.lihat',     -- lihat semua permohonan surat
+           'surat.putuskan',  -- setujui atau tolak surat
+           'info.kelola',     -- buat pengumuman dan polling
+           'lapor.kelola',    -- ubah status laporan warga
+           'warga.lihat',     -- lihat data semua warga
+           'warga.kelola',    -- tambah, ubah, hapus data warga
+           'tamu.lihat',      -- lihat buku tamu semua rumah
+           'sos.tangani',     -- terima dan tangani sinyal darurat
+           'akun.kelola')),   -- verifikasi akun, atur peran dan izin
+  primary key (peran, izin)
+);
+
+-- Peran awal. Boleh diubah dari aplikasi setelah terpasang.
+insert into public.peran (kode, nama, bawaan) values
+  ('warga',      'Warga',      true),
+  ('ketua',      'Ketua RT',   true),
+  ('bendahara',  'Bendahara',  false),
+  ('sekretaris', 'Sekretaris', false),
+  ('satpam',     'Satpam',     false)
+on conflict (kode) do nothing;
+
+insert into public.peran_izin (peran, izin) values
+  ('warga', 'rumah'),
+  ('ketua', 'rumah'), ('ketua', 'kas.kelola'), ('ketua', 'surat.lihat'), ('ketua', 'surat.putuskan'),
+  ('ketua', 'info.kelola'), ('ketua', 'lapor.kelola'), ('ketua', 'warga.lihat'), ('ketua', 'warga.kelola'),
+  ('ketua', 'tamu.lihat'), ('ketua', 'sos.tangani'), ('ketua', 'akun.kelola'),
+  ('bendahara', 'rumah'), ('bendahara', 'kas.kelola'), ('bendahara', 'warga.lihat'), ('bendahara', 'sos.tangani'),
+  ('sekretaris', 'rumah'), ('sekretaris', 'surat.lihat'), ('sekretaris', 'info.kelola'), ('sekretaris', 'lapor.kelola'),
+  ('sekretaris', 'warga.lihat'), ('sekretaris', 'warga.kelola'), ('sekretaris', 'tamu.lihat'), ('sekretaris', 'sos.tangani'),
+  ('satpam', 'tamu.lihat'), ('satpam', 'sos.tangani')
+on conflict do nothing;
+
+-- Kolom peran di profil sekarang merujuk ke tabel peran (bukan daftar tetap).
+alter table public.profiles drop constraint if exists profiles_peran_check;
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'profiles_peran_fkey') then
+    alter table public.profiles add constraint profiles_peran_fkey
+      foreign key (peran) references public.peran(kode) on update cascade;
+  end if;
+end
+$$;
+
+-- true bila akun yang login aktif dan perannya punya izin tersebut.
+-- Peran 'ketua' selalu punya semua izin, supaya tidak ada yang terkunci dari pengaturan.
+create or replace function public.punya_izin(p_izin text) returns boolean
+  language sql stable security definer set search_path = public as
+$$
+  select exists (
+    select 1 from profiles p
+     where p.id = auth.uid() and p.aktif
+       and (p.peran = 'ketua'
+            or exists (select 1 from peran_izin i where i.peran = p.peran and i.izin = p_izin)))
+$$;
+
+-- ---------- 4. Aturan akses (Row Level Security) ----------
 alter table public.profiles      enable row level security;
+alter table public.peran         enable row level security;
+alter table public.peran_izin    enable row level security;
 alter table public.iuran_jenis   enable row level security;
 alter table public.warga         enable row level security;
 alter table public.tagihan       enable row level security;
@@ -183,93 +255,142 @@ alter table public.polling_suara enable row level security;
 alter table public.lapor         enable row level security;
 alter table public.tamu          enable row level security;
 
--- Profil: lihat milik sendiri; Ketua RT melihat dan mengubah semua (verifikasi, ganti peran).
+-- Profil: lihat milik sendiri; izin 'akun.kelola' melihat dan mengubah semua.
+drop policy if exists profil_lihat on public.profiles;
 create policy profil_lihat on public.profiles for select to authenticated
-  using (id = auth.uid() or public.peran() = 'ketua');
+  using (id = auth.uid() or public.punya_izin('akun.kelola'));
+drop policy if exists profil_ubah on public.profiles;
 create policy profil_ubah on public.profiles for update to authenticated
-  using (public.peran() = 'ketua') with check (public.peran() = 'ketua');
+  using (public.punya_izin('akun.kelola')) with check (public.punya_izin('akun.kelola'));
 
--- Jenis iuran: semua akun aktif boleh lihat, Ketua RT yang mengatur.
+-- Peran dan izin: semua akun aktif membaca; 'akun.kelola' mengatur. Peran bawaan tidak bisa dihapus.
+drop policy if exists peran_lihat on public.peran;
+create policy peran_lihat on public.peran for select to authenticated
+  using (public.peran() is not null);
+drop policy if exists peran_tambah on public.peran;
+create policy peran_tambah on public.peran for insert to authenticated
+  with check (public.punya_izin('akun.kelola') and not bawaan);
+drop policy if exists peran_ubah on public.peran;
+create policy peran_ubah on public.peran for update to authenticated
+  using (public.punya_izin('akun.kelola') and not bawaan)
+  with check (public.punya_izin('akun.kelola') and not bawaan);
+drop policy if exists peran_hapus on public.peran;
+create policy peran_hapus on public.peran for delete to authenticated
+  using (public.punya_izin('akun.kelola') and not bawaan);
+
+drop policy if exists izin_lihat on public.peran_izin;
+create policy izin_lihat on public.peran_izin for select to authenticated
+  using (public.peran() is not null);
+drop policy if exists izin_atur on public.peran_izin;
+create policy izin_atur on public.peran_izin for all to authenticated
+  using (public.punya_izin('akun.kelola')) with check (public.punya_izin('akun.kelola'));
+
+-- Jenis iuran, tagihan, kas: izin 'kas.kelola'.
+drop policy if exists iuran_lihat on public.iuran_jenis;
 create policy iuran_lihat on public.iuran_jenis for select to authenticated
   using (public.peran() is not null);
+drop policy if exists iuran_atur on public.iuran_jenis;
 create policy iuran_atur on public.iuran_jenis for all to authenticated
-  using (public.peran() in ('ketua','bendahara')) with check (public.peran() in ('ketua','bendahara'));
+  using (public.punya_izin('kas.kelola')) with check (public.punya_izin('kas.kelola'));
 
--- Data warga: Ketua RT melihat semua, warga hanya rumahnya sendiri.
-create policy warga_lihat on public.warga for select to authenticated
-  using (public.peran() in ('ketua','sekretaris','bendahara') or rumah = public.rumah_saya());
-create policy warga_atur on public.warga for all to authenticated
-  using (public.peran() in ('ketua','sekretaris')) with check (public.peran() in ('ketua','sekretaris'));
-
--- Tagihan: warga melihat tagihan rumahnya, Ketua RT semua.
--- Perubahan status lunas hanya lewat fungsi di bagian 4.
+-- Perubahan status lunas hanya lewat fungsi di bagian 5.
+drop policy if exists tagihan_lihat on public.tagihan;
 create policy tagihan_lihat on public.tagihan for select to authenticated
-  using (public.peran() in ('ketua','bendahara') or rumah = public.rumah_saya());
+  using (public.punya_izin('kas.kelola') or rumah = public.rumah_saya());
 
--- Kas: laporan terbuka untuk semua akun aktif; Ketua RT mencatat.
+drop policy if exists kas_lihat on public.kas;
 create policy kas_lihat on public.kas for select to authenticated
-  using (public.peran() is not null);
+  using (public.peran() is not null);               -- laporan kas terbuka untuk semua akun aktif
+drop policy if exists kas_catat on public.kas;
 create policy kas_catat on public.kas for insert to authenticated
-  with check (public.peran() in ('ketua','bendahara'));
+  with check (public.punya_izin('kas.kelola'));
 
--- Surat: warga mengajukan dan melihat miliknya; Ketua RT melihat dan memutuskan.
+-- Data warga: 'warga.lihat' melihat semua, lainnya hanya rumahnya sendiri; 'warga.kelola' tambah/ubah/hapus.
+drop policy if exists warga_lihat on public.warga;
+create policy warga_lihat on public.warga for select to authenticated
+  using (public.punya_izin('warga.lihat') or public.punya_izin('warga.kelola') or rumah = public.rumah_saya());
+drop policy if exists warga_atur on public.warga;
+create policy warga_atur on public.warga for all to authenticated
+  using (public.punya_izin('warga.kelola')) with check (public.punya_izin('warga.kelola'));
+
+-- Surat: penghuni mengajukan dan melihat miliknya; 'surat.lihat' melihat semua; 'surat.putuskan' memutuskan.
+drop policy if exists surat_lihat on public.surat;
 create policy surat_lihat on public.surat for select to authenticated
-  using (public.peran() in ('ketua','sekretaris') or user_id = auth.uid());
+  using (public.punya_izin('surat.lihat') or public.punya_izin('surat.putuskan') or user_id = auth.uid());
+drop policy if exists surat_ajukan on public.surat;
 create policy surat_ajukan on public.surat for insert to authenticated
-  with check (user_id = auth.uid() and rumah = public.rumah_saya() and pemohon = public.nama_saya()
-              and status = 'Menunggu' and nomor is null and kode is null);
+  with check (public.punya_izin('rumah') and user_id = auth.uid() and rumah = public.rumah_saya()
+              and pemohon = public.nama_saya() and status = 'Menunggu' and nomor is null and kode is null);
+drop policy if exists surat_putuskan on public.surat;
 create policy surat_putuskan on public.surat for update to authenticated
-  using (public.peran() = 'ketua') with check (public.peran() = 'ketua');
+  using (public.punya_izin('surat.putuskan')) with check (public.punya_izin('surat.putuskan'));
 
--- SOS: pengirim melihat miliknya; Ketua RT dan satpam melihat dan menangani semua.
+-- SOS: pengirim melihat miliknya; 'sos.tangani' melihat dan menangani semua.
+drop policy if exists sos_lihat on public.sos;
 create policy sos_lihat on public.sos for select to authenticated
-  using (public.peran() in ('ketua','bendahara','sekretaris','satpam') or user_id = auth.uid());
+  using (public.punya_izin('sos.tangani') or user_id = auth.uid());
+drop policy if exists sos_kirim on public.sos;
 create policy sos_kirim on public.sos for insert to authenticated
   with check (user_id = auth.uid() and rumah = public.rumah_saya() and nama = public.nama_saya()
               and status = 'Aktif');
+drop policy if exists sos_tangani on public.sos;
 create policy sos_tangani on public.sos for update to authenticated
-  using (public.peran() in ('ketua','bendahara','sekretaris','satpam')) with check (public.peran() in ('ketua','bendahara','sekretaris','satpam'));
+  using (public.punya_izin('sos.tangani')) with check (public.punya_izin('sos.tangani'));
 
--- Pengumuman dan polling: semua akun aktif membaca, Ketua RT membuat.
+-- Pengumuman dan polling: semua akun aktif membaca; 'info.kelola' membuat.
+drop policy if exists umum_lihat on public.pengumuman;
 create policy umum_lihat on public.pengumuman for select to authenticated
   using (public.peran() is not null);
+drop policy if exists umum_buat on public.pengumuman;
 create policy umum_buat on public.pengumuman for insert to authenticated
-  with check (public.peran() in ('ketua','sekretaris'));
+  with check (public.punya_izin('info.kelola'));
 
+drop policy if exists polling_lihat on public.polling;
 create policy polling_lihat on public.polling for select to authenticated
   using (public.peran() is not null);
+drop policy if exists polling_buat on public.polling;
 create policy polling_buat on public.polling for insert to authenticated
-  with check (public.peran() in ('ketua','sekretaris'));
+  with check (public.punya_izin('info.kelola'));
+drop policy if exists opsi_lihat on public.polling_opsi;
 create policy opsi_lihat on public.polling_opsi for select to authenticated
   using (public.peran() is not null);
+drop policy if exists opsi_buat on public.polling_opsi;
 create policy opsi_buat on public.polling_opsi for insert to authenticated
-  with check (public.peran() in ('ketua','sekretaris'));
+  with check (public.punya_izin('info.kelola'));
 
 -- Suara: setiap orang hanya melihat pilihannya sendiri (rahasia).
 -- Jumlah suara diambil lewat fungsi hasil_polling().
+drop policy if exists suara_lihat on public.polling_suara;
 create policy suara_lihat on public.polling_suara for select to authenticated
   using (user_id = auth.uid());
+drop policy if exists suara_pilih on public.polling_suara;
 create policy suara_pilih on public.polling_suara for insert to authenticated
   with check (user_id = auth.uid() and public.peran() is not null);
 
--- Lapor RT: semua akun aktif melihat, pelapor membuat, Ketua RT mengubah status.
+-- Lapor RT: semua akun aktif melihat dan membuat; 'lapor.kelola' mengubah status.
+drop policy if exists lapor_lihat on public.lapor;
 create policy lapor_lihat on public.lapor for select to authenticated
   using (public.peran() is not null);
+drop policy if exists lapor_buat on public.lapor;
 create policy lapor_buat on public.lapor for insert to authenticated
   with check (user_id = auth.uid() and rumah = public.rumah_saya() and pelapor = public.nama_saya()
               and status = 'Baru');
+drop policy if exists lapor_status on public.lapor;
 create policy lapor_status on public.lapor for update to authenticated
-  using (public.peran() in ('ketua','sekretaris')) with check (public.peran() in ('ketua','sekretaris'));
+  using (public.punya_izin('lapor.kelola')) with check (public.punya_izin('lapor.kelola'));
 
--- Buku tamu: tuan rumah melihat tamunya; Ketua RT dan satpam melihat semua.
+-- Buku tamu: tuan rumah melihat tamunya; 'tamu.lihat' melihat semua.
+drop policy if exists tamu_lihat on public.tamu;
 create policy tamu_lihat on public.tamu for select to authenticated
-  using (public.peran() in ('ketua','sekretaris','satpam') or rumah = public.rumah_saya());
+  using (public.punya_izin('tamu.lihat') or rumah = public.rumah_saya());
+drop policy if exists tamu_lapor on public.tamu;
 create policy tamu_lapor on public.tamu for insert to authenticated
-  with check (user_id = auth.uid() and rumah = public.rumah_saya() and tuan = public.nama_saya());
+  with check (public.punya_izin('rumah') and user_id = auth.uid() and rumah = public.rumah_saya()
+              and tuan = public.nama_saya());
 
--- ---------- 4. Fungsi transaksi ----------
+-- ---------- 5. Fungsi transaksi ----------
 -- Nama bulan Indonesia dari teks 'YYYY-MM'.
-create function public.nama_bulan(p_bulan text) returns text
+create or replace function public.nama_bulan(p_bulan text) returns text
   language sql immutable as
 $$
   select (array['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus',
@@ -277,10 +398,10 @@ $$
          || ' ' || split_part(p_bulan, '-', 1)
 $$;
 
--- Warga membayar tagihan rumahnya. Tagihan ditandai lunas dan kas bertambah.
+-- Penghuni membayar tagihan rumahnya. Tagihan ditandai lunas dan kas bertambah.
 -- CATATAN: ini masih simulasi. Di produksi, fungsi ini dipanggil oleh webhook
 -- payment gateway (Midtrans/Xendit) setelah uang benar-benar diterima, bukan oleh warga.
-create function public.bayar_tagihan(p_bulan text, p_metode text) returns void
+create or replace function public.bayar_tagihan(p_bulan text, p_metode text) returns void
   language plpgsql security definer set search_path = public as
 $$
 declare v_rumah text := rumah_saya(); v_jumlah integer;
@@ -295,13 +416,13 @@ begin
 end
 $$;
 
--- Ketua RT atau Bendahara mencatat pembayaran tunai.
-create function public.catat_tunai(p_rumah text, p_bulan text) returns void
+-- Pencatatan pembayaran tunai (izin 'kas.kelola').
+create or replace function public.catat_tunai(p_rumah text, p_bulan text) returns void
   language plpgsql security definer set search_path = public as
 $$
 declare v_jumlah integer;
 begin
-  if peran() is null or peran() not in ('ketua','bendahara') then raise exception 'Hanya Ketua RT atau Bendahara'; end if;
+  if not punya_izin('kas.kelola') then raise exception 'Peran Anda tidak punya izin mengelola kas'; end if;
   update tagihan set lunas = true, metode = 'tunai', dibayar_pada = now()
    where rumah = p_rumah and bulan = p_bulan and not lunas
    returning jumlah into v_jumlah;
@@ -311,13 +432,13 @@ begin
 end
 $$;
 
--- Ketua RT atau Bendahara membuat tagihan satu bulan untuk semua rumah yang punya kepala keluarga.
-create function public.buat_tagihan(p_bulan text) returns integer
+-- Membuat tagihan satu bulan untuk semua rumah yang punya kepala keluarga (izin 'kas.kelola').
+create or replace function public.buat_tagihan(p_bulan text) returns integer
   language plpgsql security definer set search_path = public as
 $$
 declare v_total integer; v_n integer;
 begin
-  if peran() is null or peran() not in ('ketua','bendahara') then raise exception 'Hanya Ketua RT atau Bendahara'; end if;
+  if not punya_izin('kas.kelola') then raise exception 'Peran Anda tidak punya izin mengelola kas'; end if;
   select coalesce(sum(jumlah), 0) into v_total from iuran_jenis;
   if v_total = 0 then raise exception 'Jenis iuran belum diisi'; end if;
   insert into tagihan (rumah, bulan, jumlah)
@@ -328,14 +449,14 @@ begin
 end
 $$;
 
--- Ketua RT menyetujui surat: diberi nomor urut dan kode verifikasi.
-create function public.setujui_surat(p_id bigint) returns public.surat
+-- Menyetujui surat: diberi nomor urut dan kode verifikasi (izin 'surat.putuskan').
+create or replace function public.setujui_surat(p_id bigint) returns public.surat
   language plpgsql security definer set search_path = public as
 $$
 declare v public.surat;
         v_romawi text[] := array['I','II','III','IV','V','VI','VII','VIII','IX','X','XI','XII'];
 begin
-  if peran() is distinct from 'ketua' then raise exception 'Hanya Ketua RT'; end if;
+  if not punya_izin('surat.putuskan') then raise exception 'Peran Anda tidak punya izin memutuskan surat'; end if;
   update surat set
     status = 'Disetujui',
     setuju = now(),
@@ -350,7 +471,7 @@ end
 $$;
 
 -- Jumlah suara per pilihan, tanpa membuka siapa memilih apa.
-create function public.hasil_polling() returns table (opsi_id bigint, jumlah bigint)
+create or replace function public.hasil_polling() returns table (opsi_id bigint, jumlah bigint)
   language sql stable security definer set search_path = public as
 $$
   select s.opsi_id, count(*) from polling_suara s
@@ -362,12 +483,13 @@ revoke execute on function public.bayar_tagihan(text, text), public.catat_tunai(
 grant execute on function public.bayar_tagihan(text, text), public.catat_tunai(text, text),
   public.buat_tagihan(text), public.setujui_surat(bigint), public.hasil_polling() to authenticated;
 
--- ---------- 5. Realtime (agar SOS dan data baru langsung muncul) ----------
+-- ---------- 6. Realtime (agar SOS dan data baru langsung muncul) ----------
 alter publication supabase_realtime add table
   public.sos, public.pengumuman, public.polling, public.polling_suara, public.lapor,
-  public.surat, public.tagihan, public.kas, public.tamu, public.profiles;
+  public.surat, public.tagihan, public.kas, public.tamu, public.profiles,
+  public.warga, public.peran, public.peran_izin;
 
--- ---------- 6. Penyimpanan foto laporan ----------
+-- ---------- 7. Penyimpanan foto laporan ----------
 insert into storage.buckets (id, name, public)
 values ('lapor-foto', 'lapor-foto', true)
 on conflict (id) do nothing;

@@ -2,7 +2,7 @@
 // Dipakai selama js/config.js belum diisi. Bentuk datanya sama dengan versi Supabase.
 "use strict";
 window.DemoStore = function () {
-  const KEY = "rtku-demo-v2";
+  const KEY = "rtku-demo-v3";
   const USERS = {
     warga:  { nama: "Sari Wulandari", rumah: "C-12" },
     ketua:  { nama: "Hendra Wijaya",  rumah: "A-01" },
@@ -11,6 +11,7 @@ window.DemoStore = function () {
     satpam: { nama: "Ujang Suryana",  rumah: "Pos Jaga" }
   };
   const BULAN = "2026-11";
+  const SEMUA_IZIN = ["rumah", "kas.kelola", "surat.lihat", "surat.putuskan", "info.kelola", "lapor.kelola", "warga.lihat", "warga.kelola", "tamu.lihat", "sos.tangani", "akun.kelola"];
   const BLN = ["Januari","Februari","Maret","April","Mei","Juni","Juli","Agustus","September","Oktober","November","Desember"];
   const namaBulan = ym => BLN[Number(ym.slice(5)) - 1] + " " + ym.slice(0, 4);
   const kini = () => { const d = new Date(), p = n => String(n).padStart(2, "0"); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`; };
@@ -27,7 +28,7 @@ window.DemoStore = function () {
       ["C-09","Rizky Maulana","Kos",1,"0812-0000-0119",false],["C-09","Dimas Aditya","Kos",1,"0812-0000-0129",false],
       ["C-10","Siti Nurhaliza","Penyewa",2,"0812-0000-0110",true],["C-11","Paulus Simanjuntak","Pemilik",4,"0812-0000-0111",true],
       ["C-12","Sari Wulandari","Pemilik",3,"0812-0000-0112",true],["C-12","Tuti Rahayu","ART",1,"0812-0000-0122",false]
-    ].map(([rumah, nama, status, jiwa, hp, kk]) => ({ rumah, nama, status, jiwa, hp, kk }));
+    ].map(([rumah, nama, status, jiwa, hp, kk], i) => ({ id: i + 1, rumah, nama, status, jiwa, hp, kk }));
     const belum = { "2026-10": ["B-08"], "2026-11": ["A-03", "B-06", "B-08", "C-10", "C-12"] };
     const tagihan = [];
     ["2026-09", "2026-10", "2026-11"].forEach(bulan => warga.filter(w => w.kk).forEach(w => {
@@ -36,6 +37,13 @@ window.DemoStore = function () {
     }));
     return {
       role: "warga", seq: { surat: 14, id: 100 },
+      peran: [
+        { kode: "warga", nama: "Warga", bawaan: true, izin: ["rumah"] },
+        { kode: "ketua", nama: "Ketua RT", bawaan: true, izin: SEMUA_IZIN.slice() },
+        { kode: "bendahara", nama: "Bendahara", bawaan: false, izin: ["rumah", "kas.kelola", "warga.lihat", "sos.tangani"] },
+        { kode: "sekretaris", nama: "Sekretaris", bawaan: false, izin: ["rumah", "surat.lihat", "info.kelola", "lapor.kelola", "warga.lihat", "warga.kelola", "tamu.lihat", "sos.tangani"] },
+        { kode: "satpam", nama: "Satpam", bawaan: false, izin: ["tamu.lihat", "sos.tangani"] }
+      ],
       iuran: [{ nama: "Iuran keamanan", jumlah: 75000 }, { nama: "Iuran sampah", jumlah: 25000 }, { nama: "Kas RT", jumlah: 20000 }],
       warga, tagihan,
       kas: [
@@ -72,9 +80,11 @@ window.DemoStore = function () {
     };
   }
 
-  let D = (function () { try { const o = JSON.parse(localStorage.getItem(KEY)); if (o && o.kas && o.tagihan) return o; } catch (e) {} return seed(); })();
+  let D = (function () { try { const o = JSON.parse(localStorage.getItem(KEY)); if (o && o.kas && o.tagihan && o.peran) return o; } catch (e) {} return seed(); })();
   const save = () => { try { const c = JSON.parse(JSON.stringify(D)); c.lapor.forEach(l => { if (l.foto && l.foto.length > 2000) delete l.foto; }); localStorage.setItem(KEY, JSON.stringify(c)); } catch (e) {} };
-  const me = () => Object.assign({ id: D.role, peran: D.role, aktif: true }, USERS[D.role]);
+  // Peran buatan sendiri memakai tokoh contoh ini saat dicoba di mode demo.
+  const me = () => Object.assign({ id: D.role, peran: D.role, aktif: true }, USERS[D.role] || { nama: "Yohanes Tan", rumah: "B-07" });
+  const peranKu = () => D.peran.find(p => p.kode === D.role) || D.peran[0];
   const nid = () => ++D.seq.id;
   const cari = (arr, id) => { const x = arr.find(o => o.id === id); if (!x) throw new Error("Data tidak ditemukan"); return x; };
   function lunasi(rumah, bulan, metode) {
@@ -90,13 +100,14 @@ window.DemoStore = function () {
     async init() { return true; },
     async load() {
       return {
-        mode: "demo", me: me(), bulan: BULAN, iuran: D.iuran, warga: D.warga, tagihan: D.tagihan, kas: D.kas, surat: D.surat,
+        mode: "demo", me: me(), izin: D.role === "ketua" ? SEMUA_IZIN.slice() : peranKu().izin.slice(),
+        peranList: D.peran.map(p => ({ kode: p.kode, nama: p.nama, bawaan: p.bawaan, izin: p.izin.slice() })), bulan: BULAN, iuran: D.iuran, warga: D.warga, tagihan: D.tagihan, kas: D.kas, surat: D.surat,
         sos: D.sos, pengumuman: D.pengumuman, lapor: D.lapor, tamu: D.tamu, akun: [],
         polling: D.polling.map(q => ({ id: q.id, tanya: q.tanya, opsi: q.opsi, pilihku: q.pilih[D.role] == null ? null : q.pilih[D.role] }))
       };
     },
     onChange() {},
-    setRole(r) { D.role = r; save(); },
+    setRole(r) { if (D.peran.some(p => p.kode === r)) { D.role = r; save(); } },
     reset() { D = seed(); save(); },
 
     async bayar(bulan, metode) { lunasi(me().rumah, bulan, metode); save(); },
@@ -133,8 +144,21 @@ window.DemoStore = function () {
     async tamu(d) { const u = me(); D.tamu.push(Object.assign({ id: nid(), tuan: u.nama, rumah: u.rumah, waktu: kini() }, d)); save(); },
     async tambahWarga(d) {
       const kk = (d.status === "Pemilik" || d.status === "Penyewa") && !D.warga.some(w => w.kk && w.rumah === d.rumah);
-      D.warga.push(Object.assign({ kk }, d)); D.warga.sort((a, b) => a.rumah.localeCompare(b.rumah) || (b.kk - a.kk)); save();
+      D.warga.push(Object.assign({ id: nid(), kk }, d)); D.warga.sort((a, b) => a.rumah.localeCompare(b.rumah) || (b.kk - a.kk)); save();
     },
-    async aturAkun() {}
+    async ubahWarga(id, d) { Object.assign(cari(D.warga, id), d); D.warga.sort((a, b) => a.rumah.localeCompare(b.rumah) || (b.kk - a.kk)); save(); },
+    async hapusWarga(id) { cari(D.warga, id); D.warga = D.warga.filter(w => w.id !== id); save(); },
+    async aturAkun() {},
+    async tambahPeran(d) { D.peran.push({ kode: d.kode, nama: d.nama, bawaan: false, izin: [] }); save(); },
+    async hapusPeran(kode) {
+      const p = D.peran.find(x => x.kode === kode);
+      if (!p || p.bawaan) throw new Error("Peran bawaan tidak bisa dihapus");
+      if (kode === D.role) throw new Error("Peran ini sedang Anda pakai");
+      D.peran = D.peran.filter(x => x.kode !== kode); save();
+    },
+    async setIzin(peran, izin, aktif) {
+      const p = D.peran.find(x => x.kode === peran); if (!p) throw new Error("Peran tidak ditemukan");
+      p.izin = p.izin.filter(x => x !== izin); if (aktif) p.izin.push(izin); save();
+    }
   };
 };

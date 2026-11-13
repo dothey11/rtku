@@ -25,17 +25,25 @@ window.SupaStore = function (cfg) {
       const prof = ok(await sb.from("profiles").select("*").eq("id", user.id).maybeSingle());
       const me = prof || { id: user.id, nama: user.email, rumah: "-", peran: "warga", aktif: false };
       if (!me.aktif) return { mode: "live", me, pending: true };
-      const [iuran, warga, tagihan, kas, surat, sos, pengumuman, poll, opsi, suara, hasil, lapor, tamu, akun] = await Promise.all([
+      const [iuran, warga, tagihan, kas, surat, sos, pengumuman, poll, opsi, suara, hasil, lapor, tamu, akun, peran, izinSemua] = await Promise.all([
         semua("iuran_jenis"), semua("warga"), semua("tagihan"), semua("kas"), semua("surat", "waktu"), semua("sos", "waktu"),
         semua("pengumuman", "waktu"), semua("polling", "waktu"), semua("polling_opsi"), semua("polling_suara"),
         sb.rpc("hasil_polling").then(ok), semua("lapor", "waktu"), semua("tamu", "waktu"),
-        me.peran === "ketua" ? semua("profiles", "dibuat") : Promise.resolve([])
+        semua("profiles", "dibuat"),          // aturan akses: hanya izin 'akun.kelola' yang menerima semua akun
+        semua("peran"), semua("peran_izin")
       ]);
+      // Peran dan izinnya dibaca dari database, tidak ditulis mati di aplikasi.
+      const urut = ["warga", "ketua"];
+      const peranList = peran.map(p => ({ kode: p.kode, nama: p.nama, bawaan: p.bawaan, izin: izinSemua.filter(i => i.peran === p.kode).map(i => i.izin) }))
+        .sort((a, b) => (b.bawaan - a.bawaan) || (urut.indexOf(a.kode) - urut.indexOf(b.kode)) || a.nama.localeCompare(b.nama));
+      const semuaIzin = ["rumah", "kas.kelola", "surat.lihat", "surat.putuskan", "info.kelola", "lapor.kelola", "warga.lihat", "warga.kelola", "tamu.lihat", "sos.tangani", "akun.kelola"];
+      const punya = peranList.find(p => p.kode === me.peran);
+      const izin = me.peran === "ketua" ? semuaIzin : (punya ? punya.izin : []);
       const n = {}; (hasil || []).forEach(h => { n[h.opsi_id] = Number(h.jumlah); });
       warga.sort((a, b) => a.rumah.localeCompare(b.rumah) || (b.kk - a.kk));
       opsi.sort((a, b) => a.id - b.id);
       return {
-        mode: "live", me, bulan: bulanIni(), iuran, warga, tagihan, kas, surat, sos, pengumuman, lapor, tamu, akun,
+        mode: "live", me, izin, peranList, bulan: bulanIni(), iuran, warga, tagihan, kas, surat, sos, pengumuman, lapor, tamu, akun,
         polling: poll.map(q => {
           const s = suara.find(x => x.polling_id === q.id && x.user_id === user.id);
           return { id: q.id, tanya: q.tanya, pilihku: s ? s.opsi_id : null, opsi: opsi.filter(o => o.polling_id === q.id).map(o => ({ id: o.id, t: o.teks, n: n[o.id] || 0 })) };
@@ -89,6 +97,19 @@ window.SupaStore = function (cfg) {
       }
       ok(await sb.from("warga").insert(Object.assign({ kk }, d)));
     },
-    async aturAkun(id, ubah) { ok(await sb.from("profiles").update(ubah).eq("id", id)); }
+    async ubahWarga(id, d) { ok(await sb.from("warga").update(d).eq("id", id)); },
+    async hapusWarga(id) { ok(await sb.from("warga").delete().eq("id", id)); },
+
+    // ----- akun, peran, izin -----
+    async aturAkun(id, ubah) { ok(await sb.from("profiles").update(ubah).eq("id", id)); },
+    async tambahPeran(d) { ok(await sb.from("peran").insert({ kode: d.kode, nama: d.nama })); },
+    async hapusPeran(kode) {
+      const r = await sb.from("peran").delete().eq("kode", kode);
+      if (r.error) throw new Error(/foreign key/i.test(r.error.message) ? "Peran masih dipakai akun. Pindahkan akun itu ke peran lain dulu." : r.error.message);
+    },
+    async setIzin(peran, izin, aktif) {
+      if (aktif) ok(await sb.from("peran_izin").upsert({ peran, izin }));
+      else ok(await sb.from("peran_izin").delete().eq("peran", peran).eq("izin", izin));
+    }
   };
 };
