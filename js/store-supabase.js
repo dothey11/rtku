@@ -21,14 +21,35 @@ window.SupaStore = function (cfg) {
       ok(await sb.auth.signInWithPassword({ email: alamat, password }));
       return this.init();
     },
-    // Daftar: username, nama, rumah, email, sandi. Alamat internal dibuat dari email pendaftar
-    // dengan sisipan "+rtku.username", sehingga satu email bisa dipakai beberapa akun keluarga.
+    // Daftar: username, nama, rumah, email, sandi. Database menentukan alamat pengenal akun:
+    // email pendaftar apa adanya, atau bentuk "+rtku.username" bila email itu sudah dipakai akun lain.
     async daftar(d) {
-      if (!ok(await sb.rpc("username_tersedia", { p_username: d.username }))) throw new Error("Username itu sudah dipakai. Pilih yang lain.");
-      const at = d.email.lastIndexOf("@"), alamat = d.email.slice(0, at) + "+rtku." + d.username + d.email.slice(at);
-      const r = await sb.auth.signUp({ email: alamat.toLowerCase(), password: d.password, options: { data: { username: d.username, nama: d.nama, rumah: d.rumah, email: d.email } } });
-      if (r.error) throw new Error(/already registered/i.test(r.error.message) ? "Username itu sudah terdaftar dengan email tersebut." : /invalid/i.test(r.error.message) ? "Alamat email tidak diterima. Periksa penulisannya." : r.error.message);
+      const alamat = ok(await sb.rpc("alamat_daftar", { p_username: d.username, p_email: d.email }));
+      const r = await sb.auth.signUp({ email: alamat, password: d.password, options: { data: { username: d.username, nama: d.nama, rumah: d.rumah, email: d.email } } });
+      if (r.error) throw new Error(/already registered/i.test(r.error.message) ? "Email ini sudah terdaftar untuk akun lain." : /invalid/i.test(r.error.message) ? "Alamat email tidak diterima. Periksa penulisannya." : r.error.message);
       user = r.data.session ? r.data.session.user : null; return !!user;   // false = perlu konfirmasi email dulu
+    },
+
+    // ----- lupa kata sandi: kode OTP dikirim ke email terdaftar, warga membuat sandi baru sendiri -----
+    async mintaKode(username) {
+      const alamat = ok(await sb.rpc("email_masuk", { p_username: username }));
+      if (!alamat) throw new Error("Username tidak ditemukan.");
+      const r = await sb.auth.resetPasswordForEmail(alamat);
+      if (r.error) {
+        const m = r.error.message || "";
+        throw new Error(/not authorized/i.test(m) ? "Email belum bisa dikirim: pengurus perlu memasang layanan SMTP di Supabase."
+          : /rate limit|security purposes|only request/i.test(m) ? "Terlalu sering meminta kode. Tunggu sebentar lalu coba lagi."
+          : /invalid/i.test(m) ? "Alamat email akun ini tidak bisa dikirimi kode. Hubungi pengurus RT." : m);
+      }
+      const at = alamat.lastIndexOf("@"), depan = alamat.slice(0, at).split("+")[0];
+      return { alamat, samar: depan.slice(0, 2) + "***" + alamat.slice(at) };
+    },
+    async gantiSandiDenganKode(alamat, kode, sandi) {
+      const v = await sb.auth.verifyOtp({ email: alamat, token: kode, type: "recovery" });
+      if (v.error) throw new Error("Kode salah atau sudah kedaluwarsa. Periksa lagi, atau minta kode baru.");
+      const u = await sb.auth.updateUser({ password: sandi });
+      if (u.error) throw new Error(/different from the old/i.test(u.error.message) ? "Kata sandi baru harus berbeda dari yang lama." : u.error.message);
+      return this.init();
     },
     async keluar() { await sb.auth.signOut(); user = null; },
 
@@ -118,7 +139,6 @@ window.SupaStore = function (cfg) {
 
     // ----- akun, peran, izin -----
     async aturAkun(id, ubah) { ok(await sb.from("profiles").update(ubah).eq("id", id)); },
-    async aturUlangSandi(id, sandi) { ok(await sb.rpc("atur_ulang_sandi", { p_user: id, p_sandi: sandi })); },
     async tambahPeran(d) { ok(await sb.from("peran").insert({ kode: d.kode, nama: d.nama })); },
     async hapusPeran(kode) {
       const r = await sb.from("peran").delete().eq("kode", kode);

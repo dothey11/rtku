@@ -15,8 +15,9 @@ js/store-supabase.js     baca/tulis ke database
 js/store-demo.js         data contoh untuk mode demo
 database/schema.sql      tabel, peran dan izin, aturan akses (RLS), fungsi, realtime, storage
 database/seed.sql        data awal contoh
-database/migrasi-005-login-username.sql   pembaruan untuk database lama (memuat semua migrasi sebelumnya)
+database/migrasi-006-lupa-sandi-otp.sql   pembaruan untuk database lama (memuat semua migrasi sebelumnya)
 database/reset-akun-dan-warga.sql          mengosongkan akun dan data warga
+supabase/email-reset-sandi.html            template email kode OTP lupa kata sandi
 ```
 
 ## Dua mode
@@ -64,21 +65,29 @@ Untuk mencoba di komputer sendiri: `npx serve .` lalu buka alamat yang ditampilk
 
 ## Login dengan username
 
-Warga masuk dengan **username dan kata sandi**. Email hanya diisi saat mendaftar sebagai data kontak.
+Warga masuk dengan **username dan kata sandi**. Email diisi saat mendaftar dan dipakai untuk mengirim kode bila lupa kata sandi.
 
 | Hal | Cara kerjanya |
 |---|---|
-| Pendaftaran | Username, nama lengkap, nomor rumah, email, kata sandi |
+| Pendaftaran | Username, nama lengkap, nomor rumah, email, kata sandi. Akun aktif setelah disetujui pengurus |
 | Username | 3 sampai 20 karakter: huruf kecil, angka, titik, garis bawah. Harus unik. Disimpan di `profiles.username` |
-| Email | Disimpan di `profiles.email` sebagai kontak. Boleh sama untuk beberapa akun (misalnya suami dan istri) |
-| Lupa kata sandi | Pengurus berizin `akun.kelola` mengatur ulang dari **Pengaturan > Akun pengguna > Atur ulang sandi** |
+| Masuk | Username dan kata sandi. Tidak ada isian email |
+| Lupa kata sandi | Warga mengetik username, menerima **kode OTP** di email terdaftar, lalu membuat kata sandi baru sendiri |
 
-Supabase Auth tidak punya login username bawaan dan tetap membutuhkan sebuah alamat email sebagai pengenal internal. Aplikasi membuatnya otomatis dari email pendaftar dengan sisipan `+rtku.username` (contoh: `budi+rtku.budi01@gmail.com`), lalu menukar username dengan alamat itu saat masuk. Warga tidak pernah melihat atau mengetiknya.
+### Menyiapkan pengiriman kode OTP (wajib, satu kali)
 
-Dua hal yang perlu diketahui pengelola:
+Tanpa dua langkah ini, fitur lupa kata sandi tidak akan mengirim kode ke warga.
 
-- **Privasi:** penukaran username ke alamat internal (fungsi `email_masuk`) harus bisa dipanggil sebelum login. Akibatnya, orang yang mengetahui sebuah username dan alamat aplikasi bisa mengetahui email pendaftarnya. Bila ini tidak bisa diterima, jalan keluarnya adalah memindahkan proses masuk ke Supabase Edge Function.
-- **Email tetap harus beralamat sungguhan.** Supabase menolak domain yang tidak bisa menerima email, jadi alamat karangan seperti `nama@tidakada.xyz` akan gagal didaftarkan.
+1. **Pasang SMTP sendiri** di **Project Settings > Authentication > SMTP Settings**. Layanan email bawaan Supabase hanya mengirim ke anggota tim proyek dan dibatasi 2 email per jam, jadi tidak bisa dipakai untuk warga. Penyedia dengan paket gratis yang umum dipakai: Brevo, Resend, atau SMTP Gmail.
+2. **Ganti template email** di **Authentication > Emails > Templates > Reset password** dengan isi `supabase/email-reset-sandi.html`. Template bawaan hanya berisi tautan; template ini menampilkan kode `{{ .Token }}` yang diketik warga di aplikasi.
+
+Kode berlaku satu jam (bisa diubah di pengaturan Email OTP Expiration) dan hanya bisa diminta sekali per 60 detik.
+
+### Catatan untuk pengelola
+
+- Supabase Auth mengenali akun lewat alamat email, bukan username. Aplikasi menukar username dengan alamat itu saat masuk (fungsi `email_masuk`). Karena fungsi ini harus bisa dipanggil sebelum login, orang yang mengetahui sebuah username dan alamat aplikasi bisa mengetahui email pendaftarnya. Menutup celah ini butuh Supabase Edge Function.
+- **Satu email untuk beberapa akun** (misalnya suami dan istri): akun pertama memakai email itu apa adanya. Akun berikutnya diberi alamat `nama+rtku.username@domain`, yang tetap masuk ke kotak surat yang sama di Gmail, Outlook, iCloud, dan Proton. Layanan lain (misalnya Yahoo) tidak mendukungnya, jadi di sana tiap akun perlu email berbeda.
+- Email harus alamat sungguhan. Supabase menolak domain yang tidak bisa menerima email.
 
 ### Mengosongkan akun dan data warga
 
@@ -155,7 +164,7 @@ Yang dicatat per orang: nama, hubungan, jenis kelamin, tanggal lahir (opsional),
 
 ### Database yang sudah terpasang sebelumnya
 
-Jalankan `database/migrasi-005-login-username.sql` satu kali di SQL Editor. File ini memuat semua pembaruan sebelumnya (data warga per orang, peran dan izin dinamis, login username), berlaku untuk database versi mana pun, dan aman dijalankan ulang. Rincian perubahan pada data lama tertulis di bagian atas file. Database baru yang dibuat dari `schema.sql` terbaru tidak memerlukannya.
+Jalankan `database/migrasi-006-lupa-sandi-otp.sql` satu kali di SQL Editor. File ini memuat semua pembaruan sebelumnya (data warga per orang, peran dan izin dinamis, login username), berlaku untuk database versi mana pun, dan aman dijalankan ulang. Rincian perubahan pada data lama tertulis di bagian atas file. Database baru yang dibuat dari `schema.sql` terbaru tidak memerlukannya.
 
 ## Yang belum ada
 
@@ -168,4 +177,4 @@ Jalankan `database/migrasi-005-login-username.sql` satu kali di SQL Editor. File
 
 ## Status pengujian
 
-Skema, migrasi (dari tiap versi sebelumnya), aturan akses berbasis izin, dan fungsi database diuji pada PostgreSQL 16. Tampilan diuji dalam mode demo dan dengan klien Supabase tiruan. Sambungan ke proyek Supabase sungguhan belum diuji, jadi coba semua alur setelah langkah pemasangan di atas. Ini terutama berlaku untuk pendaftaran, masuk dengan username, dan atur ulang sandi, yang bergantung pada perilaku Supabase Auth.
+Skema, migrasi (dari tiap versi sebelumnya), aturan akses berbasis izin, dan fungsi database diuji pada PostgreSQL 16. Tampilan diuji dalam mode demo dan dengan klien Supabase tiruan. Sambungan ke proyek Supabase sungguhan belum diuji, jadi coba semua alur setelah langkah pemasangan di atas. Ini terutama berlaku untuk pendaftaran, masuk dengan username, dan kode OTP lupa kata sandi, yang bergantung pada perilaku Supabase Auth dan pengiriman email.

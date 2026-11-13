@@ -1,7 +1,7 @@
 -- =====================================================================
 -- RTku: RESET akun pengguna dan data warga
 -- PERINGATAN: menghapus permanen. Tidak bisa dibatalkan.
--- Jalankan di Supabase > SQL Editor SETELAH migrasi-005 (atau schema.sql terbaru).
+-- Jalankan di Supabase > SQL Editor SETELAH migrasi-006 (atau schema.sql terbaru).
 --
 -- DIHAPUS : semua akun login, semua data warga, dan catatan yang melekat pada
 --           rumah/orang lama: tagihan, surat, sinyal SOS, laporan warga, buku tamu,

@@ -1,0 +1,12 @@
+<!--
+  Template email "Reset password" untuk Supabase.
+  Tempel isi file ini di: Supabase > Authentication > Emails > Templates > Reset password
+  Subject yang disarankan: Kode atur ulang kata sandi RTku
+  {{ .Token }} adalah kode OTP yang diketik warga di aplikasi. Jangan dihapus.
+-->
+<h2>Atur ulang kata sandi RTku</h2>
+<p>Ada permintaan mengganti kata sandi untuk akun RTku Anda.</p>
+<p>Ketik kode ini di aplikasi:</p>
+<p style="font-size:28px;font-weight:bold;letter-spacing:4px">{{ .Token }}</p>
+<p>Kode berlaku satu jam dan hanya bisa dipakai sekali.</p>
+<p>Jika Anda tidak meminta ini, abaikan email ini. Kata sandi Anda tidak berubah.</p>

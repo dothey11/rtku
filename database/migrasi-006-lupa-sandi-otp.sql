@@ -1,11 +1,11 @@
 -- =====================================================================
--- RTku migrasi 005: login dengan username (memuat semua migrasi sebelumnya)
+-- RTku migrasi 006: lupa kata sandi dengan OTP email (memuat semua migrasi sebelumnya)
 -- Untuk database yang SUDAH terpasang dari schema.sql versi mana pun sebelumnya.
 -- Jalankan SATU KALI di Supabase > SQL Editor. Aman dijalankan ulang.
 -- Database baru yang dibuat dari schema.sql terbaru TIDAK perlu file ini.
 --
--- Isi: (1) data warga per orang, (2) peran dan izin dinamis, (3) login username.
--- Akun lama diberi username dari bagian depan emailnya, supaya tetap bisa masuk.
+-- Isi: (1) data warga per orang, (2) peran dan izin dinamis, (3) login username,
+--      (4) alamat pendaftaran untuk OTP lupa sandi; atur ulang sandi oleh pengurus dihapus.
 -- Untuk mengosongkan akun dan data warga, jalankan reset-akun-dan-warga.sql SETELAH file ini.
 -- =====================================================================
 
@@ -474,10 +474,9 @@ end
 $$;
 
 -- ---------- Login dengan username ----------
--- Warga masuk memakai USERNAME dan kata sandi. Supabase Auth tetap butuh sebuah alamat
--- email sebagai pengenal internal; aplikasi membuatnya otomatis dari email pendaftar
--- (namaemail+rtku.username@domain), sehingga satu email boleh dipakai beberapa akun
--- (misalnya suami dan istri) dan warga tidak pernah mengetik email saat masuk.
+-- Warga masuk memakai USERNAME dan kata sandi, tidak pernah mengetik email saat masuk.
+-- Supabase Auth tetap mengenali akun lewat alamat email, jadi aplikasi menukar username
+-- dengan alamat itu saat masuk. Email juga dipakai untuk mengirim kode OTP lupa sandi.
 
 -- Buat profil otomatis saat seseorang mendaftar. Data diambil dari isian form pendaftaran.
 create or replace function public.handle_new_user() returns trigger
@@ -526,21 +525,43 @@ $$
    where p.username = lower(trim(p_username))
 $$;
 
--- Pengurus berizin 'akun.kelola' mengganti kata sandi warga yang lupa.
-create or replace function public.atur_ulang_sandi(p_user uuid, p_sandi text) returns void
-  language plpgsql security definer set search_path = public, extensions as
+-- Dipakai form pendaftaran (sebelum login): tentukan alamat pengenal untuk akun baru.
+-- Normalnya alamat itu adalah email pendaftar apa adanya, supaya kode OTP lupa sandi
+-- sampai ke emailnya. Bila email itu sudah dipakai akun lain (misalnya suami dan istri
+-- berbagi satu email), dipakai bentuk "nama+rtku.username@domain", yang tetap masuk ke
+-- kotak surat yang sama pada layanan yang mendukungnya.
+create or replace function public.alamat_daftar(p_username text, p_email text) returns text
+  language plpgsql stable security definer set search_path = public as
 $$
+declare
+  v_user  text := lower(trim(p_username));
+  v_email text := lower(trim(p_email));
+  v_dom   text := split_part(lower(trim(p_email)), '@', 2);
 begin
-  if not punya_izin('akun.kelola') then raise exception 'Peran Anda tidak punya izin mengatur akun'; end if;
-  if p_user = auth.uid() then raise exception 'Ganti kata sandi sendiri lewat akun Anda, bukan lewat menu ini'; end if;
-  if length(coalesce(p_sandi, '')) < 6 then raise exception 'Kata sandi minimal 6 karakter'; end if;
-  update auth.users set encrypted_password = crypt(p_sandi, gen_salt('bf')), updated_at = now()
-   where id = p_user;
-  if not found then raise exception 'Akun tidak ditemukan'; end if;
+  if v_user !~ '^[a-z0-9_.]{3,20}$' then
+    raise exception 'Username hanya boleh huruf kecil, angka, titik, garis bawah (3 sampai 20 karakter)';
+  end if;
+  if exists (select 1 from profiles where username = v_user) then
+    raise exception 'Username itu sudah dipakai. Pilih yang lain.';
+  end if;
+  if v_email !~ '^[^@[:space:]]+@[^@[:space:]]+[.][^@[:space:]]+$' then
+    raise exception 'Alamat email tidak valid';
+  end if;
+  if not exists (select 1 from auth.users where lower(email) = v_email) then
+    return v_email;
+  end if;
+  if v_dom in ('gmail.com', 'googlemail.com', 'outlook.com', 'hotmail.com', 'live.com',
+               'icloud.com', 'me.com', 'proton.me', 'protonmail.com') then
+    return split_part(v_email, '@', 1) || '+rtku.' || v_user || '@' || v_dom;
+  end if;
+  raise exception 'Email ini sudah dipakai akun lain. Pakai alamat email lain untuk akun ini.';
 end
 $$;
 
-revoke execute on function public.atur_ulang_sandi(uuid, text) from public, anon;
-grant execute on function public.atur_ulang_sandi(uuid, text) to authenticated;
-grant execute on function public.username_tersedia(text), public.email_masuk(text) to anon, authenticated;
+-- Atur ulang sandi oleh pengurus dihapus: warga mengganti sandinya sendiri lewat kode OTP email.
+drop function if exists public.atur_ulang_sandi(uuid, text);
+
+grant execute on function public.username_tersedia(text), public.email_masuk(text),
+  public.alamat_daftar(text, text) to anon, authenticated;
+
 
