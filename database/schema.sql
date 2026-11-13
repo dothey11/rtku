@@ -470,7 +470,7 @@ create policy surat_ajukan on public.surat for insert to authenticated
 -- ---------- Login dengan username ----------
 -- Warga masuk memakai USERNAME dan kata sandi, tidak pernah mengetik email saat masuk.
 -- Supabase Auth tetap mengenali akun lewat alamat email, jadi aplikasi menukar username
--- dengan alamat itu saat masuk. Email juga dipakai untuk mengirim kode OTP lupa sandi.
+-- dengan alamat itu saat masuk. Email pendaftar hanya data kontak; tidak ada email yang dikirim.
 
 -- Buat profil otomatis saat seseorang mendaftar. Data diambil dari isian form pendaftaran.
 create or replace function public.handle_new_user() returns trigger
@@ -520,8 +520,7 @@ $$
 $$;
 
 -- Dipakai form pendaftaran (sebelum login): tentukan alamat pengenal untuk akun baru.
--- Normalnya alamat itu adalah email pendaftar apa adanya, supaya kode OTP lupa sandi
--- sampai ke emailnya. Bila email itu sudah dipakai akun lain (misalnya suami dan istri
+-- Normalnya alamat itu adalah email pendaftar apa adanya. Bila email itu sudah dipakai akun lain (misalnya suami dan istri
 -- berbagi satu email), dipakai bentuk "nama+rtku.username@domain", yang tetap masuk ke
 -- kotak surat yang sama pada layanan yang mendukungnya.
 create or replace function public.alamat_daftar(p_username text, p_email text) returns text
@@ -552,7 +551,7 @@ begin
 end
 $$;
 
--- Atur ulang sandi oleh pengurus dihapus: warga mengganti sandinya sendiri lewat kode OTP email.
+-- Fungsi lama (pengurus menentukan sandi warga) tidak dipakai lagi.
 drop function if exists public.atur_ulang_sandi(uuid, text);
 
 grant execute on function public.username_tersedia(text), public.email_masuk(text),
@@ -563,6 +562,106 @@ drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created
   after insert on auth.users
   for each row execute function public.handle_new_user();
+
+-- ---------- Lupa kata sandi: reset oleh pengurus, tanpa email ----------
+-- 1. Warga yang lupa mengirim permintaan dari halaman masuk (fungsi minta_reset).
+-- 2. Pengurus berizin 'akun.kelola' menekan Reset pada akunnya (fungsi buat_kode_reset).
+--    Hasilnya kode 6 angka sekali pakai, berlaku 24 jam, yang disampaikan ke orangnya.
+-- 3. Warga membuat kata sandi baru sendiri dengan username + kode itu (fungsi sandi_baru).
+-- Pengurus tidak pernah mengetahui atau menentukan kata sandi warga.
+create table if not exists public.permintaan_reset (
+  id        bigint generated always as identity primary key,
+  username  text,                        -- boleh kosong bila warga lupa usernamenya
+  nama      text not null,
+  rumah     text not null,
+  waktu     timestamptz not null default now(),
+  selesai   boolean not null default false
+);
+
+-- Kode reset disimpan dalam bentuk hash. Tabel ini tidak punya aturan akses sama sekali,
+-- jadi hanya bisa disentuh lewat fungsi di bawah.
+create table if not exists public.reset_sandi (
+  user_id      uuid primary key references auth.users(id) on delete cascade,
+  kode_hash    text not null,
+  kedaluwarsa  timestamptz not null,
+  gagal        integer not null default 0
+);
+
+alter table public.permintaan_reset enable row level security;
+alter table public.reset_sandi      enable row level security;
+
+drop policy if exists reset_lihat on public.permintaan_reset;
+create policy reset_lihat on public.permintaan_reset for select to authenticated
+  using (public.punya_izin('akun.kelola'));
+drop policy if exists reset_ubah on public.permintaan_reset;
+create policy reset_ubah on public.permintaan_reset for update to authenticated
+  using (public.punya_izin('akun.kelola')) with check (public.punya_izin('akun.kelola'));
+
+-- Dipanggil dari halaman masuk (sebelum login).
+create or replace function public.minta_reset(p_username text, p_nama text, p_rumah text) returns void
+  language plpgsql security definer set search_path = public as
+$$
+declare
+  v_user  text := nullif(lower(trim(coalesce(p_username, ''))), '');
+  v_nama  text := trim(coalesce(p_nama, ''));
+  v_rumah text := upper(trim(coalesce(p_rumah, '')));
+begin
+  if length(v_nama) < 2 or length(v_nama) > 60 then raise exception 'Isi nama lengkap Anda'; end if;
+  if length(v_rumah) < 1 or length(v_rumah) > 20 then raise exception 'Isi nomor rumah Anda'; end if;
+  if length(coalesce(v_user, '')) > 20 then raise exception 'Username terlalu panjang'; end if;
+  -- permintaan yang sama dan masih terbuka tidak dicatat dua kali
+  if exists (select 1 from permintaan_reset where not selesai and lower(nama) = lower(v_nama) and rumah = v_rumah) then return; end if;
+  if (select count(*) from permintaan_reset where not selesai) >= 30 then
+    raise exception 'Daftar permintaan sedang penuh. Hubungi pengurus RT secara langsung.';
+  end if;
+  insert into permintaan_reset (username, nama, rumah) values (v_user, v_nama, v_rumah);
+end
+$$;
+
+-- Pengurus menekan Reset: menghasilkan kode sekali pakai untuk akun itu.
+create or replace function public.buat_kode_reset(p_user uuid) returns text
+  language plpgsql security definer set search_path = public, extensions as
+$$
+declare v_kode text; p profiles;
+begin
+  if not punya_izin('akun.kelola') then raise exception 'Peran Anda tidak punya izin mengatur akun'; end if;
+  select * into p from profiles where id = p_user;
+  if p.id is null then raise exception 'Akun tidak ditemukan'; end if;
+  v_kode := lpad((('x' || encode(gen_random_bytes(4), 'hex'))::bit(32)::bigint % 1000000)::text, 6, '0');
+  insert into reset_sandi (user_id, kode_hash, kedaluwarsa, gagal)
+  values (p_user, crypt(v_kode, gen_salt('bf', 8)), now() + interval '24 hours', 0)
+  on conflict (user_id) do update set kode_hash = excluded.kode_hash, kedaluwarsa = excluded.kedaluwarsa, gagal = 0;
+  update permintaan_reset set selesai = true
+   where not selesai and (lower(username) = p.username or (lower(nama) = lower(p.nama) and rumah = p.rumah));
+  return v_kode;
+end
+$$;
+
+-- Warga membuat kata sandi baru dengan username + kode dari pengurus. Dipanggil sebelum login.
+-- Mengembalikan false bila username/kode salah, kode kedaluwarsa, atau sudah 5 kali salah.
+create or replace function public.sandi_baru(p_username text, p_kode text, p_sandi text) returns boolean
+  language plpgsql security definer set search_path = public, extensions as
+$$
+declare v_id uuid; r reset_sandi;
+begin
+  if length(coalesce(p_sandi, '')) < 6 then raise exception 'Kata sandi minimal 6 karakter'; end if;
+  select id into v_id from profiles where username = lower(trim(p_username));
+  if v_id is null then return false; end if;
+  select * into r from reset_sandi where user_id = v_id;
+  if r.user_id is null or r.kedaluwarsa < now() or r.gagal >= 5 then return false; end if;
+  if r.kode_hash <> crypt(trim(coalesce(p_kode, '')), r.kode_hash) then
+    update reset_sandi set gagal = gagal + 1 where user_id = v_id;
+    return false;
+  end if;
+  update auth.users set encrypted_password = crypt(p_sandi, gen_salt('bf', 10)), updated_at = now() where id = v_id;
+  delete from reset_sandi where user_id = v_id;
+  return true;
+end
+$$;
+
+revoke execute on function public.buat_kode_reset(uuid) from public, anon;
+grant execute on function public.buat_kode_reset(uuid) to authenticated;
+grant execute on function public.minta_reset(text, text, text), public.sandi_baru(text, text, text) to anon, authenticated;
 
 -- ---------- 5. Fungsi transaksi ----------
 -- Nama bulan Indonesia dari teks 'YYYY-MM'.
@@ -663,7 +762,7 @@ grant execute on function public.bayar_tagihan(text, text), public.catat_tunai(t
 alter publication supabase_realtime add table
   public.sos, public.pengumuman, public.polling, public.polling_suara, public.lapor,
   public.surat, public.tagihan, public.kas, public.tamu, public.profiles,
-  public.warga, public.peran, public.peran_izin;
+  public.warga, public.peran, public.peran_izin, public.permintaan_reset;
 
 -- ---------- 7. Penyimpanan foto laporan ----------
 insert into storage.buckets (id, name, public)

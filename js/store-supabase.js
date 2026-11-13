@@ -30,27 +30,17 @@ window.SupaStore = function (cfg) {
       user = r.data.session ? r.data.session.user : null; return !!user;   // false = perlu konfirmasi email dulu
     },
 
-    // ----- lupa kata sandi: kode OTP dikirim ke email terdaftar, warga membuat sandi baru sendiri -----
-    async mintaKode(username) {
-      const alamat = ok(await sb.rpc("email_masuk", { p_username: username }));
-      if (!alamat) throw new Error("Username tidak ditemukan.");
-      const r = await sb.auth.resetPasswordForEmail(alamat);
-      if (r.error) {
-        const m = r.error.message || "";
-        throw new Error(/not authorized/i.test(m) ? "Email belum bisa dikirim: pengurus perlu memasang layanan SMTP di Supabase."
-          : /rate limit|security purposes|only request/i.test(m) ? "Terlalu sering meminta kode. Tunggu sebentar lalu coba lagi."
-          : /invalid/i.test(m) ? "Alamat email akun ini tidak bisa dikirimi kode. Hubungi pengurus RT." : m);
-      }
-      const at = alamat.lastIndexOf("@"), depan = alamat.slice(0, at).split("+")[0];
-      return { alamat, samar: depan.slice(0, 2) + "***" + alamat.slice(at) };
+    // ----- lupa kata sandi: tanpa email -----
+    // Warga mengirim permintaan; pengurus menekan Reset dan mendapat kode sekali pakai;
+    // warga membuat kata sandi baru dengan username + kode itu, lalu langsung masuk.
+    async mintaReset(d) { ok(await sb.rpc("minta_reset", { p_username: d.username, p_nama: d.nama, p_rumah: d.rumah })); },
+    async buatKodeReset(id) { return ok(await sb.rpc("buat_kode_reset", { p_user: id })); },
+    async sandiBaru(username, kode, sandi) {
+      if (!ok(await sb.rpc("sandi_baru", { p_username: username, p_kode: kode, p_sandi: sandi })))
+        throw new Error("Username atau kode reset salah, atau kodenya sudah kedaluwarsa. Minta pengurus RT menekan Reset lagi.");
+      return this.masuk(username, sandi);
     },
-    async gantiSandiDenganKode(alamat, kode, sandi) {
-      const v = await sb.auth.verifyOtp({ email: alamat, token: kode, type: "recovery" });
-      if (v.error) throw new Error("Kode salah atau sudah kedaluwarsa. Periksa lagi, atau minta kode baru.");
-      const u = await sb.auth.updateUser({ password: sandi });
-      if (u.error) throw new Error(/different from the old/i.test(u.error.message) ? "Kata sandi baru harus berbeda dari yang lama." : u.error.message);
-      return this.init();
-    },
+    async selesaiReset(id) { ok(await sb.from("permintaan_reset").update({ selesai: true }).eq("id", id)); },
     async keluar() { await sb.auth.signOut(); user = null; },
 
     // ----- muat semua data yang boleh dilihat akun ini -----
@@ -58,12 +48,13 @@ window.SupaStore = function (cfg) {
       const prof = ok(await sb.from("profiles").select("*").eq("id", user.id).maybeSingle());
       const me = prof || { id: user.id, nama: user.email, rumah: "-", peran: "warga", aktif: false };
       if (!me.aktif) return { mode: "live", me, pending: true };
-      const [iuran, warga, tagihan, kas, surat, sos, pengumuman, poll, opsi, suara, hasil, lapor, tamu, akun, peran, izinSemua] = await Promise.all([
+      const [iuran, warga, tagihan, kas, surat, sos, pengumuman, poll, opsi, suara, hasil, lapor, tamu, akun, peran, izinSemua, minta] = await Promise.all([
         semua("iuran_jenis"), semua("warga"), semua("tagihan"), semua("kas"), semua("surat", "waktu"), semua("sos", "waktu"),
         semua("pengumuman", "waktu"), semua("polling", "waktu"), semua("polling_opsi"), semua("polling_suara"),
         sb.rpc("hasil_polling").then(ok), semua("lapor", "waktu"), semua("tamu", "waktu"),
         semua("profiles", "dibuat"),          // aturan akses: hanya izin 'akun.kelola' yang menerima semua akun
-        semua("peran"), semua("peran_izin")
+        semua("peran"), semua("peran_izin"),
+        semua("permintaan_reset", "waktu")      // aturan akses: hanya izin 'akun.kelola' yang menerima isinya
       ]);
       // Peran dan izinnya dibaca dari database, tidak ditulis mati di aplikasi.
       const urut = ["warga", "ketua"];
@@ -76,7 +67,7 @@ window.SupaStore = function (cfg) {
       warga.sort((a, b) => a.rumah.localeCompare(b.rumah) || (b.kk - a.kk));
       opsi.sort((a, b) => a.id - b.id);
       return {
-        mode: "live", me, izin, peranList, bulan: bulanIni(), iuran, warga, tagihan, kas, surat, sos, pengumuman, lapor, tamu, akun,
+        mode: "live", me, izin, peranList, reset: minta.filter(x => !x.selesai), bulan: bulanIni(), iuran, warga, tagihan, kas, surat, sos, pengumuman, lapor, tamu, akun,
         polling: poll.map(q => {
           const s = suara.find(x => x.polling_id === q.id && x.user_id === user.id);
           return { id: q.id, tanya: q.tanya, pilihku: s ? s.opsi_id : null, opsi: opsi.filter(o => o.polling_id === q.id).map(o => ({ id: o.id, t: o.teks, n: n[o.id] || 0 })) };

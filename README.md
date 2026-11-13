@@ -15,9 +15,8 @@ js/store-supabase.js     baca/tulis ke database
 js/store-demo.js         data contoh untuk mode demo
 database/schema.sql      tabel, peran dan izin, aturan akses (RLS), fungsi, realtime, storage
 database/seed.sql        data awal contoh
-database/migrasi-006-lupa-sandi-otp.sql   pembaruan untuk database lama (memuat semua migrasi sebelumnya)
+database/migrasi-007-reset-sandi-pengurus.sql   pembaruan untuk database lama (memuat semua migrasi sebelumnya)
 database/reset-akun-dan-warga.sql          mengosongkan akun dan data warga
-supabase/email-reset-sandi.html            template email kode OTP lupa kata sandi
 ```
 
 ## Dua mode
@@ -42,7 +41,7 @@ supabase/email-reset-sandi.html            template email kode OTP lupa kata san
    ```
 
    Anon key aman berada di repo karena akses data dijaga aturan RLS. **Jangan pernah** memakai `service_role key` di sini.
-5. Matikan konfirmasi email: **Authentication > Sign In / Providers > Email > Confirm email** (off). Tanpa ini setiap pendaftar harus membuka tautan di emailnya sebelum bisa masuk.
+5. Matikan konfirmasi email: **Authentication > Sign In / Providers > Email > Confirm email** (off). Aplikasi ini tidak memakai SMTP, jadi bila tetap menyala email konfirmasinya tidak akan sampai dan pendaftar tidak bisa masuk.
 6. Buka aplikasi, pilih **Daftar akun**, dan daftarkan diri Anda: username, nama lengkap, nomor rumah, email, kata sandi.
 7. Jadikan akun pertama itu Ketua RT. Jalankan di SQL Editor (ganti usernamenya):
 
@@ -65,29 +64,35 @@ Untuk mencoba di komputer sendiri: `npx serve .` lalu buka alamat yang ditampilk
 
 ## Login dengan username
 
-Warga masuk dengan **username dan kata sandi**. Email diisi saat mendaftar dan dipakai untuk mengirim kode bila lupa kata sandi.
+Warga masuk dengan **username dan kata sandi**. Aplikasi tidak mengirim email apa pun, jadi tidak perlu SMTP.
 
 | Hal | Cara kerjanya |
 |---|---|
 | Pendaftaran | Username, nama lengkap, nomor rumah, email, kata sandi. Akun aktif setelah disetujui pengurus |
 | Username | 3 sampai 20 karakter: huruf kecil, angka, titik, garis bawah. Harus unik. Disimpan di `profiles.username` |
 | Masuk | Username dan kata sandi. Tidak ada isian email |
-| Lupa kata sandi | Warga mengetik username, menerima **kode OTP** di email terdaftar, lalu membuat kata sandi baru sendiri |
+| Email | Data kontak saja, disimpan di `profiles.email` |
 
-### Menyiapkan pengiriman kode OTP (wajib, satu kali)
+### Lupa username atau kata sandi
 
-Tanpa dua langkah ini, fitur lupa kata sandi tidak akan mengirim kode ke warga.
+1. **Warga** memilih "Lupa username atau kata sandi?" di halaman masuk, lalu mengisi nama lengkap dan nomor rumah (username boleh dikosongkan bila lupa).
+2. **Pengurus** berizin `akun.kelola` melihat permintaan itu di **Pengaturan > Permintaan reset kata sandi**, memastikan yang meminta memang pemilik akun, lalu menekan **Reset**. Aplikasi menampilkan username dan **kode reset 6 angka** untuk disampaikan ke orangnya.
+3. **Warga** memilih "Saya sudah punya kode reset", mengisi username, kode, dan kata sandi baru, lalu langsung masuk.
 
-1. **Pasang SMTP sendiri** di **Project Settings > Authentication > SMTP Settings**. Layanan email bawaan Supabase hanya mengirim ke anggota tim proyek dan dibatasi 2 email per jam, jadi tidak bisa dipakai untuk warga. Penyedia dengan paket gratis yang umum dipakai: Brevo, Resend, atau SMTP Gmail.
-2. **Ganti template email** di **Authentication > Emails > Templates > Reset password** dengan isi `supabase/email-reset-sandi.html`. Template bawaan hanya berisi tautan; template ini menampilkan kode `{{ .Token }}` yang diketik warga di aplikasi.
+Ketentuannya:
 
-Kode berlaku satu jam (bisa diubah di pengaturan Email OTP Expiration) dan hanya bisa diminta sekali per 60 detik.
+- Pengurus hanya menekan Reset. Ia tidak menentukan dan tidak pernah mengetahui kata sandi warga.
+- Kode berlaku 24 jam, sekali pakai, dan hangus setelah 5 kali salah ketik. Kode disimpan sebagai hash.
+- Kata sandi lama tetap berlaku sampai warga membuat yang baru.
+- Tombol Reset juga ada di tiap baris **Akun pengguna**, untuk warga yang meminta secara langsung tanpa lewat aplikasi.
+- Ketua RT yang lupa kata sandinya perlu pengurus lain yang berizin `akun.kelola`. Bila tidak ada, kata sandinya diganti lewat dashboard Supabase.
 
 ### Catatan untuk pengelola
 
-- Supabase Auth mengenali akun lewat alamat email, bukan username. Aplikasi menukar username dengan alamat itu saat masuk (fungsi `email_masuk`). Karena fungsi ini harus bisa dipanggil sebelum login, orang yang mengetahui sebuah username dan alamat aplikasi bisa mengetahui email pendaftarnya. Menutup celah ini butuh Supabase Edge Function.
-- **Satu email untuk beberapa akun** (misalnya suami dan istri): akun pertama memakai email itu apa adanya. Akun berikutnya diberi alamat `nama+rtku.username@domain`, yang tetap masuk ke kotak surat yang sama di Gmail, Outlook, iCloud, dan Proton. Layanan lain (misalnya Yahoo) tidak mendukungnya, jadi di sana tiap akun perlu email berbeda.
+- Supabase Auth mengenali akun lewat alamat email, bukan username. Aplikasi menukar username dengan alamat itu saat masuk (fungsi `email_masuk`). Karena fungsi ini harus bisa dipanggil sebelum login, orang yang mengetahui sebuah username dan alamat aplikasi bisa mengetahui email pendaftarnya.
+- **Satu email untuk beberapa akun** (misalnya suami dan istri): akun pertama memakai email itu apa adanya, akun berikutnya otomatis diberi alamat `nama+rtku.username@domain` (Gmail, Outlook, iCloud, Proton). Di layanan lain tiap akun perlu email berbeda.
 - Email harus alamat sungguhan. Supabase menolak domain yang tidak bisa menerima email.
+- Matikan **Confirm email** di Authentication > Sign In / Providers > Email. Bila menyala, Supabase mencoba mengirim email konfirmasi saat pendaftaran, dan tanpa SMTP email itu tidak akan sampai.
 
 ### Mengosongkan akun dan data warga
 
@@ -164,7 +169,7 @@ Yang dicatat per orang: nama, hubungan, jenis kelamin, tanggal lahir (opsional),
 
 ### Database yang sudah terpasang sebelumnya
 
-Jalankan `database/migrasi-006-lupa-sandi-otp.sql` satu kali di SQL Editor. File ini memuat semua pembaruan sebelumnya (data warga per orang, peran dan izin dinamis, login username), berlaku untuk database versi mana pun, dan aman dijalankan ulang. Rincian perubahan pada data lama tertulis di bagian atas file. Database baru yang dibuat dari `schema.sql` terbaru tidak memerlukannya.
+Jalankan `database/migrasi-007-reset-sandi-pengurus.sql` satu kali di SQL Editor. File ini memuat semua pembaruan sebelumnya (data warga per orang, peran dan izin dinamis, login username), berlaku untuk database versi mana pun, dan aman dijalankan ulang. Rincian perubahan pada data lama tertulis di bagian atas file. Database baru yang dibuat dari `schema.sql` terbaru tidak memerlukannya.
 
 ## Yang belum ada
 
@@ -177,4 +182,4 @@ Jalankan `database/migrasi-006-lupa-sandi-otp.sql` satu kali di SQL Editor. File
 
 ## Status pengujian
 
-Skema, migrasi (dari tiap versi sebelumnya), aturan akses berbasis izin, dan fungsi database diuji pada PostgreSQL 16. Tampilan diuji dalam mode demo dan dengan klien Supabase tiruan. Sambungan ke proyek Supabase sungguhan belum diuji, jadi coba semua alur setelah langkah pemasangan di atas. Ini terutama berlaku untuk pendaftaran, masuk dengan username, dan kode OTP lupa kata sandi, yang bergantung pada perilaku Supabase Auth dan pengiriman email.
+Skema, migrasi (dari tiap versi sebelumnya), aturan akses berbasis izin, dan fungsi database diuji pada PostgreSQL 16. Tampilan diuji dalam mode demo dan dengan klien Supabase tiruan. Sambungan ke proyek Supabase sungguhan belum diuji, jadi coba semua alur setelah langkah pemasangan di atas. Ini terutama berlaku untuk pendaftaran, masuk dengan username, dan pembuatan kata sandi baru dengan kode reset (fungsi `sandi_baru` menulis langsung ke tabel akun Supabase), yang bergantung pada perilaku Supabase Auth.

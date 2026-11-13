@@ -105,7 +105,7 @@ window.DemoStore = function () {
     async init() { return true; },
     async load() {
       return {
-        mode: "demo", me: me(), izin: D.role === "ketua" ? SEMUA_IZIN.slice() : peranKu().izin.slice(),
+        mode: "demo", me: me(), reset: [], izin: D.role === "ketua" ? SEMUA_IZIN.slice() : peranKu().izin.slice(),
         peranList: D.peran.map(p => ({ kode: p.kode, nama: p.nama, bawaan: p.bawaan, izin: p.izin.slice() })), bulan: BULAN, iuran: D.iuran, warga: D.warga, tagihan: D.tagihan, kas: D.kas, surat: D.surat,
         sos: D.sos, pengumuman: D.pengumuman, lapor: D.lapor, tamu: D.tamu, akun: [],
         polling: D.polling.map(q => ({ id: q.id, tanya: q.tanya, opsi: q.opsi, pilihku: q.pilih[D.role] == null ? null : q.pilih[D.role] }))

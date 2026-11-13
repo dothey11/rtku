@@ -6,7 +6,7 @@
   const live = diisi && !!window.supabase;
   const store = live ? window.SupaStore(cfg) : window.DemoStore();
 
-  let S = null, masuk = false, galat = "", infoTab = "pengumuman", filterWarga = "Semua", fotoFile = null, authTab = "masuk", lupa = null;   // lupa = { username, alamat, samar } saat menunggu kode OTP
+  let S = null, masuk = false, galat = "", infoTab = "pengumuman", filterWarga = "Semua", fotoFile = null, authTab = "masuk", pesan = "";   // pesan = kabar baik di halaman masuk (misalnya permintaan reset terkirim)
   // Daftar izin yang dikenal aplikasi. Peran mana punya izin apa disimpan di database (tabel peran_izin).
   const IZIN = [
     ["rumah", "Penghuni rumah: bayar iuran, ajukan surat, lapor tamu, tombol SOS"],
@@ -73,7 +73,7 @@
     if (v === "darurat") return S.sos.filter(x => x.status !== "Selesai").length;
     if (v === "surat" && bisa("surat.putuskan")) return S.surat.filter(x => x.status === "Menunggu").length;
     if (v === "iuran" && !tanpaRumah()) return tagihanku().filter(t => !t.lunas).length;
-    if (v === "pengaturan") return S.akun.filter(a => !a.aktif).length;
+    if (v === "pengaturan") return S.akun.filter(a => !a.aktif).length + S.reset.length;
     return 0;
   }
 
@@ -119,25 +119,28 @@
   function vAuth() {
     const diMasuk = authTab !== "daftar";
     const tab = `<div class="tabs" role="group" aria-label="Masuk atau daftar"><button data-act="auth-tab" data-v="masuk" aria-pressed="${diMasuk}">Masuk</button><button data-act="auth-tab" data-v="daftar" aria-pressed="${!diMasuk}">Daftar akun</button></div>`;
-    const err = galat ? `<p class="err">${esc(galat)}</p>` : "";
+    const err = (galat ? `<p class="err">${esc(galat)}</p>` : "") + (pesan ? `<p class="live" style="border-radius:10px;padding:10px 12px">${esc(pesan)}</p>` : "");
     let form;
     if (authTab === "masuk") form = `<form class="f" data-form="masuk"><div class="fld"><label for="a-u">Username</label><input id="a-u" name="username" required autocomplete="username" autocapitalize="none" spellcheck="false"></div>
           <div class="fld"><label for="a-p">Kata sandi</label><input id="a-p" name="password" type="password" required autocomplete="current-password"></div><button class="btn pri">Masuk</button>
-          <button type="button" class="btn" data-act="auth-tab" data-v="lupa">Lupa kata sandi?</button></form>`;
-    else if (authTab === "lupa") form = `<h2>Lupa kata sandi</h2><p>Ketik username Anda. Kami kirim kode ke email yang Anda daftarkan.</p>
-          <form class="f" data-form="lupa"><div class="fld"><label for="lp-u">Username</label><input id="lp-u" name="username" required autocomplete="username" autocapitalize="none" spellcheck="false"></div>
-          <button class="btn pri">Kirim kode ke email saya</button><button type="button" class="btn" data-act="auth-tab" data-v="masuk">Kembali ke Masuk</button></form>`;
-    else if (authTab === "kode" && lupa) form = `<h2>Buat kata sandi baru</h2><p>Kode sudah dikirim ke <b>${esc(lupa.samar)}</b> untuk akun <b>${esc(lupa.username)}</b>. Buka email itu, lalu ketik kodenya di sini. Periksa juga folder Spam.</p>
-          <form class="f" data-form="kode"><div class="fld"><label for="kd-k">Kode dari email</label><input id="kd-k" name="kode" required inputmode="numeric" pattern="[0-9]{6,10}" autocomplete="one-time-code" placeholder="Contoh: 123456"></div>
+          <button type="button" class="btn" data-act="auth-tab" data-v="lupa">Lupa username atau kata sandi?</button></form>`;
+    else if (authTab === "lupa") form = `<h2>Lupa username atau kata sandi</h2>
+          <p class="small">1. Kirim permintaan di bawah ini. 2. Pengurus RT menekan Reset dan memberi Anda <b>username</b> serta <b>kode reset</b>. 3. Buka "Saya sudah punya kode reset" dan buat kata sandi baru.</p>
+          <form class="f" data-form="lupa"><div class="fld"><label for="lp-n">Nama lengkap</label><input id="lp-n" name="nama" required maxlength="60" autocomplete="name"></div>
+          <div class="fld"><label for="lp-r">Nomor rumah</label><input id="lp-r" name="rumah" required maxlength="20" placeholder="Contoh: C-12"></div>
+          <div class="fld"><label for="lp-u">Username (kosongkan bila lupa)</label><input id="lp-u" name="username" maxlength="20" autocomplete="username" autocapitalize="none" spellcheck="false"></div>
+          <button class="btn pri">Kirim permintaan ke pengurus RT</button><button type="button" class="btn" data-act="auth-tab" data-v="kode">Saya sudah punya kode reset</button><button type="button" class="btn" data-act="auth-tab" data-v="masuk">Kembali ke Masuk</button></form>`;
+    else if (authTab === "kode") form = `<h2>Buat kata sandi baru</h2><p class="small">Isi username dan kode reset yang diberikan pengurus RT. Kode berlaku 24 jam dan hanya bisa dipakai sekali.</p>
+          <form class="f" data-form="kode"><div class="fld"><label for="kd-u">Username</label><input id="kd-u" name="username" required autocomplete="username" autocapitalize="none" spellcheck="false"></div>
+          <div class="fld"><label for="kd-k">Kode reset (6 angka)</label><input id="kd-k" name="kode" required inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="off" placeholder="Contoh: 123456"></div>
           <div class="fld"><label for="kd-p">Kata sandi baru (minimal 6 karakter)</label><input id="kd-p" name="sandi" type="password" minlength="6" required autocomplete="new-password"></div>
           <div class="fld"><label for="kd-p2">Ulangi kata sandi baru</label><input id="kd-p2" name="sandi2" type="password" minlength="6" required autocomplete="new-password"></div>
-          <button class="btn pri">Simpan kata sandi baru</button><button type="button" class="btn" data-act="kode-ulang">Kirim ulang kode</button><button type="button" class="btn" data-act="auth-tab" data-v="masuk">Batal</button></form>
-          <p class="small muted">Kode berlaku satu jam dan hanya bisa dipakai sekali.</p>`;
+          <button class="btn pri">Simpan kata sandi baru dan masuk</button><button type="button" class="btn" data-act="auth-tab" data-v="lupa">Belum punya kode</button><button type="button" class="btn" data-act="auth-tab" data-v="masuk">Batal</button></form>`;
     else form = `<form class="f" data-form="daftar"><div class="fld"><label for="d-u">Username (untuk masuk)</label><input id="d-u" name="username" required minlength="3" maxlength="20" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="Contoh: budi_c12">
             <span class="small muted">3 sampai 20 karakter: huruf kecil, angka, titik, atau garis bawah. Tanpa spasi.</span></div>
           <div class="fld"><label for="d-n">Nama lengkap</label><input id="d-n" name="nama" required autocomplete="name"></div>
           <div class="fld"><label for="d-r">Nomor rumah</label><input id="d-r" name="rumah" required placeholder="Contoh: C-12"></div>
-          <div class="fld"><label for="d-e">Email</label><input id="d-e" name="email" type="email" required autocomplete="email"><span class="small muted">Pakai email yang bisa Anda buka. Masuk tetap memakai username; email ini dipakai untuk mengirim kode bila Anda lupa kata sandi.</span></div>
+          <div class="fld"><label for="d-e">Email</label><input id="d-e" name="email" type="email" required autocomplete="email"><span class="small muted">Hanya sebagai data kontak. Masuk tetap memakai username.</span></div>
           <div class="fld"><label for="d-p">Kata sandi (minimal 6 karakter)</label><input id="d-p" name="password" type="password" minlength="6" required autocomplete="new-password"></div>
           <button class="btn pri">Daftar</button><p class="small muted">Setelah mendaftar, akun perlu disetujui pengurus RT sebelum bisa dipakai.</p></form>`;
     return `<div class="card auth"><h1>Masuk ke RTku</h1><p class="muted">Aplikasi warga RT 04 / RW 07</p>${tab}${err}${form}</div>`;
@@ -374,16 +377,21 @@
     const akun = live
       ? `<div class="card"><div class="head"><h2>Akun pengguna</h2><span class="small muted">${S.akun.filter(a => !a.aktif).length} menunggu persetujuan</span></div>
           <div class="list">${daftar.map(a => `<div class="row"><div class="grow"><b>${esc(a.nama)}</b> · rumah ${esc(a.rumah)}<p class="small muted">Username: <b>${esc(a.username || "")}</b>${a.email ? " · " + esc(a.email) : ""}</p><p class="small muted">${a.aktif ? "Peran: " + esc(namaPeran(a.peran)) : "Mendaftar " + tgl(a.dibuat) + ", belum disetujui"}</p></div>
-            <div class="acts">${a.aktif ? pill("Aktif", "ok") : pill("Menunggu", "warn")}${a.id === me().id ? pill("Akun Anda", "mute") : `<span class="small">Peran:</span>${pilihPeran(a.id, a.peran)}<button class="btn pri sm" data-act="akun" data-uid="${a.id}" data-v="simpan">${a.aktif ? "Simpan peran" : "Setujui dengan peran ini"}</button>${a.aktif ? `<button class="btn sm" data-act="akun" data-uid="${a.id}" data-v="nonaktif">Nonaktifkan</button>` : ""}`}</div></div>`).join("")}</div>
-          <p class="small muted">Pilih peran di kotak pilihan, lalu klik tombolnya. Cocokkan nama dan nomor rumah dengan data warga lebih dulu: akun yang disetujui bisa melihat data rumah tersebut. Peran bisa diganti kapan saja dari sini. Warga yang lupa kata sandi mengatur ulang sendiri lewat "Lupa kata sandi?" di halaman masuk.</p></div>`
+            <div class="acts">${a.aktif ? pill("Aktif", "ok") : pill("Menunggu", "warn")}${a.id === me().id ? pill("Akun Anda", "mute") : `<span class="small">Peran:</span>${pilihPeran(a.id, a.peran)}<button class="btn pri sm" data-act="akun" data-uid="${a.id}" data-v="simpan">${a.aktif ? "Simpan peran" : "Setujui dengan peran ini"}</button>${a.aktif ? `<button class="btn sm" data-act="akun" data-uid="${a.id}" data-v="nonaktif">Nonaktifkan</button>` : ""}<button class="btn sm" data-act="reset-sandi" data-uid="${a.id}">Reset kata sandi</button>`}</div></div>`).join("")}</div>
+          <p class="small muted">Pilih peran di kotak pilihan, lalu klik tombolnya. Cocokkan nama dan nomor rumah dengan data warga lebih dulu: akun yang disetujui bisa melihat data rumah tersebut. Peran bisa diganti kapan saja dari sini. </p></div>`
       : `<div class="card"><h2>Akun pengguna</h2><p class="muted">Mode demo tidak memakai akun login. Setelah tersambung ke database, pendaftar baru muncul di sini untuk disetujui dan diberi peran.</p></div>`;
+    const minta = !live ? "" : `<div class="card"><div class="head"><h2>Permintaan reset kata sandi</h2><span class="small muted">${S.reset.length} menunggu</span></div>
+          <div class="list">${S.reset.map(r => { const cocok = S.akun.filter(a => (r.username && a.username === r.username) || (a.nama.toLowerCase() === r.nama.toLowerCase() && a.rumah === r.rumah));
+            return `<div class="row"><div class="grow"><b>${esc(r.nama)}</b> · rumah ${esc(r.rumah)}<p class="small muted">${r.username ? "Username yang diketik: " + esc(r.username) : "Lupa username"} · ${jam(r.waktu)}</p><p class="small muted">${cocok.length ? "Akun yang cocok: " + cocok.map(a => esc(a.username)).join(", ") : "Tidak ada akun yang cocok persis. Cari orangnya di daftar Akun pengguna."}</p></div>
+              <div class="acts">${cocok.map(a => `<button class="btn pri sm" data-act="reset-sandi" data-uid="${a.id}">Reset ${esc(a.username)}</button>`).join("")}<button class="btn sm" data-act="reset-abaikan" data-id="${r.id}">Abaikan</button></div></div>`; }).join("") || `<p class="muted">Tidak ada permintaan.</p>`}</div>
+          <p class="small muted">Pastikan dulu bahwa yang meminta memang pemilik akunnya, misalnya dengan menelepon atau bertemu. Reset menghasilkan kode sekali pakai; Anda tidak menentukan kata sandinya.</p></div>`;
     const matriks = `<div class="card"><div class="head"><h2>Peran dan izin</h2><span class="small muted">Centang untuk memberi izin. Berlaku seketika.</span></div>
       <div class="tw"><table><thead><tr><th>Izin</th>${S.peranList.map(p => `<th style="text-align:center">${esc(p.nama)}${p.bawaan ? "" : `<br><button class="btn sm" data-act="peran-hapus" data-v="${esc(p.kode)}">Hapus</button>`}</th>`).join("")}</tr></thead>
       <tbody>${IZIN.map(([k, ket]) => `<tr><td style="white-space:normal;min-width:220px">${ket}</td>${S.peranList.map(p => `<td style="text-align:center"><input type="checkbox" aria-label="${esc(p.nama)}: ${ket}" data-ip="${esc(p.kode)}" data-ik="${k}" ${p.kode === "ketua" || p.izin.includes(k) ? "checked" : ""} ${p.kode === "ketua" ? "disabled" : ""}></td>`).join("")}</tr>`).join("")}</tbody></table></div>
       <p class="small muted">Ketua RT selalu memiliki semua izin, supaya pengaturan ini tidak pernah terkunci. Peran Warga dan Ketua RT tidak bisa dihapus.</p></div>`;
     const tambah = `<div class="card"><h2>Tambah peran</h2><form class="f" data-form="peran"><div class="fld"><label for="pr-n">Nama peran</label><input id="pr-n" name="nama" required maxlength="30" placeholder="Contoh: Humas, Ketua Pemuda, Koordinator Keamanan"></div><button class="btn pri">Tambah peran</button></form>
       <p class="small muted">Peran baru belum punya izin apa pun. Centang izinnya di tabel, lalu berikan peran itu ke akun di daftar Akun pengguna.</p></div>`;
-    return `<div class="head"><div><h1>Pengaturan</h1><p class="muted">Setujui akun baru, tentukan perannya, dan atur izin tiap peran.</p></div></div>${akun}${matriks}<div class="two">${tambah}<div></div></div>`;
+    return `<div class="head"><div><h1>Pengaturan</h1><p class="muted">Setujui akun baru, tentukan perannya, dan atur izin tiap peran.</p></div></div>${minta}${akun}${matriks}<div class="two">${tambah}<div></div></div>`;
   }
 
   // ---------- modal, toast, pemuatan ----------
@@ -422,13 +430,8 @@
     const act = el.dataset.act, v = el.dataset.v, id = Number(el.dataset.id);
     if (act === "tutup-luar") { if (e.target === el) modal(""); return; }
     if (act === "tutup") { modal(""); return; }
-    if (act === "auth-tab") { authTab = v; galat = ""; if (v !== "kode") lupa = null; render(); return; }
-    if (act === "kode-ulang") {
-      if (!lupa || sibuk) return; sibuk = true;
-      try { await store.mintaKode(lupa.username); toast("Kode baru dikirim. Pakai kode dari email yang paling baru."); } catch (err) { toast(err.message); }
-      sibuk = false; return;
-    }
-    if (act === "keluar") { await store.keluar(); masuk = false; S = null; authTab = "masuk"; galat = ""; location.hash = ""; render(); return; }
+    if (act === "auth-tab") { authTab = v; galat = ""; pesan = ""; render(); return; }
+    if (act === "keluar") { await store.keluar(); masuk = false; S = null; authTab = "masuk"; galat = ""; pesan = ""; location.hash = ""; render(); return; }
     if (act === "cek-lagi") { await muat(); if (S && S.pending) toast("Belum diverifikasi"); return; }
     if (!S || S.pending) return;
     if (act === "role") { store.setRole(v); S = await store.load(); render(); return; }
@@ -462,6 +465,17 @@
       const uid = el.dataset.uid, sel = document.querySelector(`select[data-peran="${uid}"]`), peran = sel ? sel.value : "warga";
       aksi(() => store.aturAkun(uid, v === "nonaktif" ? { aktif: false } : { aktif: true, peran }), v === "nonaktif" ? "Akun dinonaktifkan" : `Akun aktif sebagai ${namaPeran(peran)}`); return;
     }
+    if (act === "reset-sandi") {
+      const a = S.akun.find(x => x.id === el.dataset.uid); if (!a) return;
+      modal(`<h2>Reset kata sandi?</h2><p>Akun <b>${esc(a.username)}</b> (${esc(a.nama)}, rumah ${esc(a.rumah)}).</p><p class="small muted">Aplikasi akan membuat kode reset sekali pakai. Kata sandi lama tetap berlaku sampai pemilik akun membuat yang baru dengan kode itu.</p><div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn" data-act="tutup">Batal</button><button class="btn pri" data-act="reset-sandi-ya" data-uid="${a.id}">Reset dan buat kode</button></div>`); return;
+    }
+    if (act === "reset-sandi-ya") {
+      const a = S.akun.find(x => x.id === el.dataset.uid); if (!a) return;
+      modal(""); const kode = await aksi(() => store.buatKodeReset(a.id));
+      if (typeof kode === "string") modal(`<h2>Kode reset dibuat</h2><p>Sampaikan dua hal ini kepada <b>${esc(a.nama)}</b>:</p><div class="list"><div class="row"><span>Username</span><b>${esc(a.username)}</b></div><div class="row"><span>Kode reset</span><b class="num" style="font-size:24px;letter-spacing:3px">${esc(kode)}</b></div></div><p class="small muted">Berlaku 24 jam, sekali pakai. Di halaman masuk, ia memilih "Lupa username atau kata sandi?", lalu "Saya sudah punya kode reset". Kode ini tidak bisa ditampilkan lagi setelah jendela ini ditutup; bila hilang, tekan Reset sekali lagi.</p>${tombolTutup}`);
+      return;
+    }
+    if (act === "reset-abaikan") { aksi(() => store.selesaiReset(id), "Permintaan ditutup"); return; }
     if (act === "warga-ubah") {
       const w = S.warga.find(x => x.id === id); if (!w || !bolehUbah(w)) return;
       modal(`<h2>${w.kk ? "Ubah data kepala keluarga" : "Ubah data anggota"}</h2><form class="f" data-form="warga-ubah" data-id="${id}">${w.kk ? fieldKK("e", w) : fieldAnggota("e", w, w.rumah)}<div style="display:flex;gap:8px;justify-content:flex-end"><button type="button" class="btn" data-act="tutup">Batal</button><button class="btn pri">Simpan perubahan</button></div></form>`); return;
@@ -488,17 +502,16 @@
     const d = Object.fromEntries(new FormData(f).entries()), k = f.dataset.form;
     const rapi = o => { Object.keys(o).forEach(x => { if (typeof o[x] === "string") o[x] = o[x].trim(); }); return o; };
     if (k === "lupa") {
-      if (sibuk) return; sibuk = true; galat = "";
-      const username = d.username.trim().toLowerCase();
-      try { const r = await store.mintaKode(username); lupa = { username, alamat: r.alamat, samar: r.samar }; authTab = "kode"; }
+      if (sibuk) return; sibuk = true; galat = ""; pesan = "";
+      try { await store.mintaReset({ username: d.username.trim().toLowerCase(), nama: d.nama.trim(), rumah: d.rumah.trim().toUpperCase() }); authTab = "kode"; pesan = "Permintaan terkirim. Hubungi pengurus RT untuk mendapat username dan kode reset, lalu isi di sini."; }
       catch (err) { galat = err.message; }
       sibuk = false; render(); return;
     }
     if (k === "kode") {
-      if (sibuk || !lupa) return;
+      if (sibuk) return;
       if (d.sandi !== d.sandi2) { toast("Dua isian kata sandi baru belum sama"); return; }
-      sibuk = true; galat = "";
-      try { await store.gantiSandiDenganKode(lupa.alamat, d.kode.trim(), d.sandi); lupa = null; authTab = "masuk"; sibuk = false; await muat(); toast("Kata sandi berhasil diganti"); }
+      sibuk = true; galat = ""; pesan = "";
+      try { await store.sandiBaru(d.username.trim().toLowerCase(), d.kode.trim(), d.sandi); authTab = "masuk"; sibuk = false; await muat(); toast("Kata sandi berhasil diganti"); }
       catch (err) { sibuk = false; toast(err.message); }
       return;
     }
