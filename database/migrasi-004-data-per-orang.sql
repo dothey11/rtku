@@ -1,14 +1,43 @@
 -- =====================================================================
--- RTku migrasi 003: peran dan izin dinamis
--- Untuk database yang SUDAH terpasang dari schema.sql versi sebelumnya
--- (baik yang sudah maupun belum menjalankan migrasi 002).
+-- RTku migrasi 004: data warga per orang (sekaligus memuat migrasi 003)
+-- Untuk database yang SUDAH terpasang dari schema.sql versi mana pun sebelumnya.
 -- Jalankan SATU KALI di Supabase > SQL Editor. Aman dijalankan ulang.
 -- Database baru yang dibuat dari schema.sql terbaru TIDAK perlu file ini.
 --
--- Isi: tabel peran + peran_izin, fungsi punya_izin(), dan semua aturan akses
--- ditulis ulang agar membaca izin dari tabel (tidak lagi ditulis mati).
--- Data yang ada (warga, kas, tagihan, akun, dan lainnya) tidak diubah.
+-- Yang berubah pada data yang ada:
+--   * Baris warga lama tetap ada. Kepala keluarga diberi hubungan "Kepala keluarga",
+--     Kos menjadi "Anak kos", ART tetap "ART".
+--   * Jumlah jiwa kepala keluarga sekarang berarti SELURUH penghuni rumah, jadi
+--     ditambah dengan jumlah ART/kos yang sudah terdata di rumah itu (total tidak berubah).
+--   * Bila satu rumah punya lebih dari satu kepala keluarga, yang pertama didaftarkan
+--     dipertahankan dan yang lain menjadi anggota keluarga.
 -- =====================================================================
+
+alter table public.surat add column if not exists untuk text;
+
+do $$
+begin
+  if not exists (select 1 from information_schema.columns
+                  where table_schema = 'public' and table_name = 'warga' and column_name = 'hubungan') then
+    alter table public.warga add column hubungan text,
+                             add column kelamin text check (kelamin in ('L','P')),
+                             add column tgl_lahir date;
+    alter table public.warga drop constraint if exists warga_status_check;
+    update public.warga set kk = false where status in ('Kos','ART') and kk;
+    update public.warga w set kk = false
+     where kk and exists (select 1 from public.warga x where x.rumah = w.rumah and x.kk and x.id < w.id);
+    update public.warga set status = 'Keluarga' where not kk and status in ('Pemilik','Penyewa');
+    update public.warga set hubungan = case when kk then 'Kepala keluarga' when status = 'Kos' then 'Anak kos'
+                                            when status = 'ART' then 'ART' else 'Keluarga lainnya' end;
+    update public.warga k set jiwa = k.jiwa + (select count(*) from public.warga w where w.rumah = k.rumah and not w.kk)
+     where k.kk;
+    update public.warga set jiwa = 1 where not kk;
+    alter table public.warga add constraint warga_status_check
+      check ((kk and status in ('Pemilik','Penyewa')) or (not kk and status in ('Keluarga','Kos','ART')));
+    create unique index warga_satu_kk on public.warga (rumah) where kk;
+  end if;
+end
+$$;
 
 -- ---------- 3. Peran dan izin (dinamis) ----------
 -- Hak akses TIDAK ditulis mati di kode. Setiap peran punya daftar izin di tabel
@@ -324,6 +353,91 @@ revoke execute on function public.bayar_tagihan(text, text), public.catat_tunai(
   public.buat_tagihan(text), public.setujui_surat(bigint), public.hasil_polling() from public, anon;
 grant execute on function public.bayar_tagihan(text, text), public.catat_tunai(text, text),
   public.buat_tagihan(text), public.setujui_surat(bigint), public.hasil_polling() to authenticated;
+
+-- ---------- Data warga per orang ----------
+-- Satu baris = satu orang. Tiap rumah punya satu kepala keluarga (kk = true, status
+-- Pemilik atau Penyewa) yang didaftarkan pengurus beserta jumlah jiwa awal. Anggota
+-- lain (keluarga, ART, anak kos) ditambahkan pengurus atau oleh penghuni rumah itu sendiri.
+
+-- true bila rumah sudah punya kepala keluarga terdaftar
+create or replace function public.rumah_terdaftar(p_rumah text) returns boolean
+  language sql stable security definer set search_path = public as
+$$ select exists (select 1 from warga where rumah = p_rumah and kk) $$;
+
+-- true bila nama itu terdata sebagai penghuni rumah akun yang login
+create or replace function public.anggota_saya(p_nama text) returns boolean
+  language sql stable security definer set search_path = public as
+$$ select exists (select 1 from warga where rumah = rumah_saya() and nama = p_nama) $$;
+
+-- Sebelum simpan: rapikan nomor rumah; anggota selalu dihitung 1 jiwa;
+-- kepala keluarga tidak bisa dihapus selama rumahnya masih punya anggota terdata.
+create or replace function public.warga_sebelum() returns trigger
+  language plpgsql security definer set search_path = public as
+$$
+begin
+  if tg_op = 'DELETE' then
+    if old.kk and exists (select 1 from warga where rumah = old.rumah and not kk) then
+      raise exception 'Rumah % masih punya anggota terdata. Hapus anggotanya dulu.', old.rumah;
+    end if;
+    return old;
+  end if;
+  new.rumah := upper(trim(new.rumah));
+  if new.kk then new.hubungan := 'Kepala keluarga'; else new.jiwa := 1; end if;
+  return new;
+end
+$$;
+
+-- Sesudah simpan: jumlah jiwa di baris kepala keluarga naik otomatis bila orang yang
+-- terdata melebihi jumlah jiwa awal. Bila nomor rumah kepala keluarga diubah, anggotanya ikut pindah.
+create or replace function public.warga_sesudah() returns trigger
+  language plpgsql security definer set search_path = public as
+$$
+declare v_rumah text[] := '{}'; r text; n integer;
+begin
+  if tg_op = 'UPDATE' then
+    if old.kk and new.kk and new.rumah <> old.rumah then
+      update warga set rumah = new.rumah where rumah = old.rumah and not kk;
+    end if;
+    v_rumah := array[new.rumah, old.rumah];
+  elsif tg_op = 'INSERT' then v_rumah := array[new.rumah];
+  else v_rumah := array[old.rumah];
+  end if;
+  foreach r in array v_rumah loop
+    select count(*) into n from warga where rumah = r;
+    update warga set jiwa = n where kk and rumah = r and jiwa < n;
+  end loop;
+  return null;
+end
+$$;
+
+drop trigger if exists warga_sebelum_trg on public.warga;
+create trigger warga_sebelum_trg before insert or update or delete on public.warga
+  for each row execute function public.warga_sebelum();
+drop trigger if exists warga_sesudah_trg on public.warga;
+create trigger warga_sesudah_trg after insert or update or delete on public.warga
+  for each row execute function public.warga_sesudah();
+
+-- Penghuni (izin 'rumah') boleh menambah, mengubah, dan menghapus ANGGOTA rumahnya sendiri.
+-- Nomor rumah terkunci ke rumah akunnya, dan rumah itu harus sudah didaftarkan pengurus.
+-- Baris kepala keluarga hanya bisa diubah oleh izin 'warga.kelola'.
+drop policy if exists warga_anggota_tambah on public.warga;
+create policy warga_anggota_tambah on public.warga for insert to authenticated
+  with check (public.punya_izin('rumah') and not kk and rumah = public.rumah_saya()
+              and public.rumah_terdaftar(rumah));
+drop policy if exists warga_anggota_ubah on public.warga;
+create policy warga_anggota_ubah on public.warga for update to authenticated
+  using (public.punya_izin('rumah') and not kk and rumah = public.rumah_saya())
+  with check (public.punya_izin('rumah') and not kk and rumah = public.rumah_saya());
+drop policy if exists warga_anggota_hapus on public.warga;
+create policy warga_anggota_hapus on public.warga for delete to authenticated
+  using (public.punya_izin('rumah') and not kk and rumah = public.rumah_saya());
+
+-- Surat boleh diajukan atas nama anggota rumah sendiri (kolom "untuk").
+drop policy if exists surat_ajukan on public.surat;
+create policy surat_ajukan on public.surat for insert to authenticated
+  with check (public.punya_izin('rumah') and user_id = auth.uid() and rumah = public.rumah_saya()
+              and pemohon = public.nama_saya() and status = 'Menunggu' and nomor is null and kode is null
+              and (untuk is null or public.anggota_saya(untuk)));
 
 -- Realtime untuk tabel baru (dilewati bila sudah terdaftar)
 do $$

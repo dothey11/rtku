@@ -61,7 +61,7 @@ window.SupaStore = function (cfg) {
     async catatKas(d) { ok(await sb.from("kas").insert({ tgl: d.tgl, ket: d.ket, jenis: d.jenis, jml: d.jml })); },
 
     // ----- surat -----
-    async ajukanSurat(d) { ok(await sb.from("surat").insert({ jenis: d.jenis, keperluan: d.keperluan })); },
+    async ajukanSurat(d) { ok(await sb.from("surat").insert({ jenis: d.jenis, keperluan: d.keperluan, untuk: d.untuk || null })); },
     async setujuiSurat(id) { return ok(await sb.rpc("setujui_surat", { p_id: id })); },
     async tolakSurat(id, catatan) { ok(await sb.from("surat").update({ status: "Ditolak", catatan }).eq("id", id)); },
 
@@ -89,15 +89,19 @@ window.SupaStore = function (cfg) {
 
     // ----- warga dan tamu -----
     async tamu(d) { ok(await sb.from("tamu").insert(d)); },
-    async tambahWarga(d) {
-      let kk = false;
-      if (d.status === "Pemilik" || d.status === "Penyewa") {
-        const ada = ok(await sb.from("warga").select("id").eq("rumah", d.rumah).eq("kk", true));
-        kk = !ada || !ada.length;
-      }
-      ok(await sb.from("warga").insert(Object.assign({ kk }, d)));
+    // Pengurus mendaftarkan kepala keluarga; pengurus atau penghuni menambah anggota (rumah dikunci di database).
+    async tambahKK(d) {
+      const r = await sb.from("warga").insert(Object.assign({ kk: true }, d));
+      if (r.error) throw new Error(/warga_satu_kk/.test(r.error.message) ? "Rumah itu sudah punya kepala keluarga terdaftar." : r.error.message);
     },
-    async ubahWarga(id, d) { ok(await sb.from("warga").update(d).eq("id", id)); },
+    async tambahAnggota(rumah, d) {
+      const r = await sb.from("warga").insert(Object.assign({ kk: false, rumah }, d));
+      if (r.error) throw new Error(/row-level security/.test(r.error.message) ? "Tidak bisa menambah anggota: rumah belum didaftarkan pengurus, atau bukan rumah Anda." : r.error.message);
+    },
+    async ubahWarga(id, d) {
+      const r = await sb.from("warga").update(d).eq("id", id);
+      if (r.error) throw new Error(/warga_satu_kk/.test(r.error.message) ? "Rumah itu sudah punya kepala keluarga terdaftar." : r.error.message);
+    },
     async hapusWarga(id) { ok(await sb.from("warga").delete().eq("id", id)); },
 
     // ----- akun, peran, izin -----

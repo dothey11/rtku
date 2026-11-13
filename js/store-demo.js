@@ -2,7 +2,7 @@
 // Dipakai selama js/config.js belum diisi. Bentuk datanya sama dengan versi Supabase.
 "use strict";
 window.DemoStore = function () {
-  const KEY = "rtku-demo-v3";
+  const KEY = "rtku-demo-v4";
   const USERS = {
     warga:  { nama: "Sari Wulandari", rumah: "C-12" },
     ketua:  { nama: "Hendra Wijaya",  rumah: "A-01" },
@@ -19,16 +19,17 @@ window.DemoStore = function () {
   const ROMAWI = ["I","II","III","IV","V","VI","VII","VIII","IX","X","XI","XII"];
 
   function seed() {
+    // Kepala keluarga (jiwa = seluruh penghuni rumah) dan anggota yang sudah terdata.
     const warga = [
-      ["A-01","Hendra Wijaya","Pemilik",4,"0812-0000-0101",true],["A-02","Agus Santoso","Pemilik",3,"0812-0000-0102",true],
-      ["A-03","Rina Marlina","Penyewa",2,"0812-0000-0103",true],["A-04","Made Sudarsana","Pemilik",5,"0812-0000-0104",true],
-      ["A-04","Sumiyati","ART",1,"0812-0000-0114",false],["B-05","Fitri Handayani","Pemilik",4,"0812-0000-0105",true],
-      ["B-06","Bambang Prasetyo","Pemilik",4,"0812-0000-0106",true],["B-07","Yohanes Tan","Pemilik",2,"0812-0000-0107",true],
-      ["B-08","Dewi Lestari","Penyewa",3,"0812-0000-0108",true],["C-09","Ahmad Fauzi","Pemilik",6,"0812-0000-0109",true],
-      ["C-09","Rizky Maulana","Kos",1,"0812-0000-0119",false],["C-09","Dimas Aditya","Kos",1,"0812-0000-0129",false],
-      ["C-10","Siti Nurhaliza","Penyewa",2,"0812-0000-0110",true],["C-11","Paulus Simanjuntak","Pemilik",4,"0812-0000-0111",true],
-      ["C-12","Sari Wulandari","Pemilik",3,"0812-0000-0112",true],["C-12","Tuti Rahayu","ART",1,"0812-0000-0122",false]
-    ].map(([rumah, nama, status, jiwa, hp, kk], i) => ({ id: i + 1, rumah, nama, status, jiwa, hp, kk }));
+      ["A-01","Hendra Wijaya",true,"Pemilik","Kepala keluarga","L","1974-05-12","0812-0000-0101",4],["A-02","Agus Santoso",true,"Pemilik","Kepala keluarga","L","1980-09-03","0812-0000-0102",3],
+      ["A-03","Rina Marlina",true,"Penyewa","Kepala keluarga","P","1991-01-27","0812-0000-0103",2],["A-04","Made Sudarsana",true,"Pemilik","Kepala keluarga","L","1969-11-08","0812-0000-0104",6],
+      ["A-04","Sumiyati",false,"ART","ART","P","1988-02-14","0812-0000-0114",1],["B-05","Fitri Handayani",true,"Pemilik","Kepala keluarga","P","1983-07-19","0812-0000-0105",4],
+      ["B-06","Bambang Prasetyo",true,"Pemilik","Kepala keluarga","L","1977-03-30","0812-0000-0106",4],["B-07","Yohanes Tan",true,"Pemilik","Kepala keluarga","L","1958-12-01","0812-0000-0107",2],
+      ["B-08","Dewi Lestari",true,"Penyewa","Kepala keluarga","P","1993-06-22","0812-0000-0108",3],["C-09","Ahmad Fauzi",true,"Pemilik","Kepala keluarga","L","1971-04-17","0812-0000-0109",8],
+      ["C-09","Rizky Maulana",false,"Kos","Anak kos","L","2004-08-09","0812-0000-0119",1],["C-09","Dimas Aditya",false,"Kos","Anak kos","L","2003-10-25","0812-0000-0129",1],
+      ["C-10","Siti Nurhaliza",true,"Penyewa","Kepala keluarga","P","1995-02-11","0812-0000-0110",2],["C-11","Paulus Simanjuntak",true,"Pemilik","Kepala keluarga","L","1979-09-14","0812-0000-0111",4],
+      ["C-12","Sari Wulandari",true,"Pemilik","Kepala keluarga","P","1986-05-05","0812-0000-0112",4],["C-12","Tuti Rahayu",false,"ART","ART","P","1990-12-30","0812-0000-0122",1]
+    ].map(([rumah, nama, kk, status, hubungan, kelamin, tgl_lahir, hp, jiwa], i) => ({ id: i + 1, rumah, nama, kk, status, hubungan, kelamin, tgl_lahir, hp, jiwa }));
     const belum = { "2026-10": ["B-08"], "2026-11": ["A-03", "B-06", "B-08", "C-10", "C-12"] };
     const tagihan = [];
     ["2026-09", "2026-10", "2026-11"].forEach(bulan => warga.filter(w => w.kk).forEach(w => {
@@ -57,7 +58,7 @@ window.DemoStore = function () {
       ].map(([tgl, ket, jenis, jml]) => ({ tgl, ket, jenis, jml })),
       surat: [
         { id: 1, jenis: "Surat Keterangan Domisili", keperluan: "Pembukaan rekening bank", pemohon: "Sari Wulandari", rumah: "C-12", waktu: "2026-10-21T19:10", status: "Disetujui", nomor: "013/SK/RT04-RW07/X/2026", kode: "K7Q2M9XA", setuju: "2026-10-22T07:30" },
-        { id: 2, jenis: "Surat Pengantar KTP", keperluan: "Perekaman KTP anak usia 17 tahun", pemohon: "Bambang Prasetyo", rumah: "B-06", waktu: "2026-11-10T20:35", status: "Menunggu" }
+        { id: 2, jenis: "Surat Pengantar KTP", keperluan: "Perekaman KTP anak usia 17 tahun", untuk: "Galih Prasetyo", pemohon: "Bambang Prasetyo", rumah: "B-06", waktu: "2026-11-10T20:35", status: "Menunggu" }
       ],
       sos: [{ id: 1, jenis: "Darurat medis", nama: "Yohanes Tan", rumah: "B-07", waktu: "2026-10-29T22:14", status: "Selesai", petugas: "Ujang Suryana" }],
       pengumuman: [
@@ -80,12 +81,16 @@ window.DemoStore = function () {
     };
   }
 
-  let D = (function () { try { const o = JSON.parse(localStorage.getItem(KEY)); if (o && o.kas && o.tagihan && o.peran) return o; } catch (e) {} return seed(); })();
+  let D = (function () { try { const o = JSON.parse(localStorage.getItem(KEY)); if (o && o.kas && o.tagihan && o.peran && o.warga.every(w => "hubungan" in w)) return o; } catch (e) {} return seed(); })();
   const save = () => { try { const c = JSON.parse(JSON.stringify(D)); c.lapor.forEach(l => { if (l.foto && l.foto.length > 2000) delete l.foto; }); localStorage.setItem(KEY, JSON.stringify(c)); } catch (e) {} };
   // Peran buatan sendiri memakai tokoh contoh ini saat dicoba di mode demo.
   const me = () => Object.assign({ id: D.role, peran: D.role, aktif: true }, USERS[D.role] || { nama: "Yohanes Tan", rumah: "B-07" });
   const peranKu = () => D.peran.find(p => p.kode === D.role) || D.peran[0];
   const nid = () => ++D.seq.id;
+  const izinKu = () => D.role === "ketua" ? SEMUA_IZIN : peranKu().izin;
+  const wajib = k => { if (!izinKu().includes(k)) throw new Error("Peran Anda tidak punya izin untuk ini."); };
+  const bolehAnggota = rumah => izinKu().includes("warga.kelola") || (izinKu().includes("rumah") && rumah === me().rumah);
+  const hitung = rumah => { const k = D.warga.find(w => w.kk && w.rumah === rumah), n = D.warga.filter(w => w.rumah === rumah).length; if (k && k.jiwa < n) k.jiwa = n; };
   const cari = (arr, id) => { const x = arr.find(o => o.id === id); if (!x) throw new Error("Data tidak ditemukan"); return x; };
   function lunasi(rumah, bulan, metode) {
     const t = D.tagihan.find(x => x.rumah === rumah && x.bulan === bulan && !x.lunas);
@@ -119,7 +124,7 @@ window.DemoStore = function () {
     },
     async catatKas(d) { D.kas.push({ tgl: d.tgl, ket: d.ket, jenis: d.jenis, jml: d.jml }); save(); },
 
-    async ajukanSurat(d) { const u = me(); D.surat.push({ id: nid(), jenis: d.jenis, keperluan: d.keperluan, pemohon: u.nama, rumah: u.rumah, waktu: kini(), status: "Menunggu" }); save(); },
+    async ajukanSurat(d) { const u = me(); D.surat.push({ id: nid(), jenis: d.jenis, keperluan: d.keperluan, untuk: d.untuk || null, pemohon: u.nama, rumah: u.rumah, waktu: kini(), status: "Menunggu" }); save(); },
     async setujuiSurat(id) {
       const s = cari(D.surat, id), d = new Date();
       s.status = "Disetujui"; s.setuju = kini(); s.kode = kode();
@@ -142,12 +147,37 @@ window.DemoStore = function () {
     async laporStatus(id, status) { cari(D.lapor, id).status = status; save(); },
 
     async tamu(d) { const u = me(); D.tamu.push(Object.assign({ id: nid(), tuan: u.nama, rumah: u.rumah, waktu: kini() }, d)); save(); },
-    async tambahWarga(d) {
-      const kk = (d.status === "Pemilik" || d.status === "Penyewa") && !D.warga.some(w => w.kk && w.rumah === d.rumah);
-      D.warga.push(Object.assign({ id: nid(), kk }, d)); D.warga.sort((a, b) => a.rumah.localeCompare(b.rumah) || (b.kk - a.kk)); save();
+    // Aturan di bawah meniru database: satu kepala keluarga per rumah, anggota dihitung 1 jiwa,
+    // jumlah jiwa naik sendiri, penghuni hanya boleh mengurus anggota rumahnya sendiri.
+    async tambahKK(d) {
+      wajib("warga.kelola");
+      if (D.warga.some(w => w.kk && w.rumah === d.rumah)) throw new Error("Rumah itu sudah punya kepala keluarga terdaftar.");
+      D.warga.push(Object.assign({ id: nid(), kk: true, hubungan: "Kepala keluarga" }, d)); hitung(d.rumah); save();
     },
-    async ubahWarga(id, d) { Object.assign(cari(D.warga, id), d); D.warga.sort((a, b) => a.rumah.localeCompare(b.rumah) || (b.kk - a.kk)); save(); },
-    async hapusWarga(id) { cari(D.warga, id); D.warga = D.warga.filter(w => w.id !== id); save(); },
+    async tambahAnggota(rumah, d) {
+      if (!bolehAnggota(rumah)) throw new Error("Tidak bisa menambah anggota: bukan rumah Anda.");
+      if (!D.warga.some(w => w.kk && w.rumah === rumah)) throw new Error("Rumah belum didaftarkan pengurus.");
+      D.warga.push(Object.assign({ id: nid(), kk: false, rumah, jiwa: 1 }, d)); hitung(rumah); save();
+    },
+    async ubahWarga(id, d) {
+      const w = cari(D.warga, id), lama = w.rumah;
+      if (w.kk) {
+        wajib("warga.kelola");
+        if (d.rumah !== lama && D.warga.some(x => x.kk && x.rumah === d.rumah)) throw new Error("Rumah itu sudah punya kepala keluarga terdaftar.");
+        Object.assign(w, d);
+        if (d.rumah !== lama) D.warga.forEach(x => { if (!x.kk && x.rumah === lama) x.rumah = d.rumah; });
+      } else {
+        if (!bolehAnggota(w.rumah)) throw new Error("Bukan anggota rumah Anda.");
+        Object.assign(w, d, { rumah: w.rumah, jiwa: 1 });
+      }
+      hitung(w.rumah); save();
+    },
+    async hapusWarga(id) {
+      const w = cari(D.warga, id);
+      if (w.kk) { wajib("warga.kelola"); if (D.warga.some(x => !x.kk && x.rumah === w.rumah)) throw new Error(`Rumah ${w.rumah} masih punya anggota terdata. Hapus anggotanya dulu.`); }
+      else if (!bolehAnggota(w.rumah)) throw new Error("Bukan anggota rumah Anda.");
+      D.warga = D.warga.filter(x => x.id !== id); save();
+    },
     async aturAkun() {},
     async tambahPeran(d) { D.peran.push({ kode: d.kode, nama: d.nama, bawaan: false, izin: [] }); save(); },
     async hapusPeran(kode) {

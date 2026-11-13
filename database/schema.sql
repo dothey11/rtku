@@ -56,15 +56,22 @@ create table public.iuran_jenis (
   jumlah  integer not null check (jumlah > 0)
 );
 
+-- Satu baris = satu orang. Lihat bagian "Data warga per orang" untuk aturannya.
 create table public.warga (
-  id      bigint generated always as identity primary key,
-  rumah   text not null,
-  nama    text not null,
-  status  text not null check (status in ('Pemilik','Penyewa','Kos','ART')),
-  jiwa    integer not null default 1 check (jiwa > 0),
-  hp      text not null default '',
-  kk      boolean not null default false   -- true = kepala keluarga, penanggung iuran rumah itu
+  id         bigint generated always as identity primary key,
+  rumah      text not null,
+  nama       text not null,
+  kk         boolean not null default false,  -- true = kepala keluarga, penanggung iuran rumah itu
+  status     text not null,                   -- kepala keluarga: Pemilik/Penyewa; anggota: Keluarga/Kos/ART
+  hubungan   text,                            -- Kepala keluarga, Istri, Suami, Anak, Orang tua, Saudara, ART, Anak kos, ...
+  kelamin    text check (kelamin in ('L','P')),
+  tgl_lahir  date,
+  hp         text not null default '',
+  jiwa       integer not null default 1 check (jiwa > 0),  -- di baris kepala keluarga: jumlah seluruh penghuni rumah
+  constraint warga_status_check check ((kk and status in ('Pemilik','Penyewa'))
+                                       or (not kk and status in ('Keluarga','Kos','ART')))
 );
+create unique index warga_satu_kk on public.warga (rumah) where kk;   -- satu kepala keluarga per rumah
 create index on public.warga (rumah);
 
 create table public.tagihan (
@@ -91,7 +98,8 @@ create sequence public.surat_nomor_seq start 1;
 create table public.surat (
   id         bigint generated always as identity primary key,
   user_id    uuid default auth.uid() references auth.users(id) on delete set null,
-  pemohon    text not null default public.nama_saya(),
+  pemohon    text not null default public.nama_saya(),   -- pemilik akun yang mengajukan
+  untuk      text,                                       -- nama anggota rumah yang dimaksud surat (kosong = pemohon)
   rumah      text not null default public.rumah_saya(),
   jenis      text not null,
   keperluan  text not null,
@@ -387,6 +395,91 @@ drop policy if exists tamu_lapor on public.tamu;
 create policy tamu_lapor on public.tamu for insert to authenticated
   with check (public.punya_izin('rumah') and user_id = auth.uid() and rumah = public.rumah_saya()
               and tuan = public.nama_saya());
+
+-- ---------- Data warga per orang ----------
+-- Satu baris = satu orang. Tiap rumah punya satu kepala keluarga (kk = true, status
+-- Pemilik atau Penyewa) yang didaftarkan pengurus beserta jumlah jiwa awal. Anggota
+-- lain (keluarga, ART, anak kos) ditambahkan pengurus atau oleh penghuni rumah itu sendiri.
+
+-- true bila rumah sudah punya kepala keluarga terdaftar
+create or replace function public.rumah_terdaftar(p_rumah text) returns boolean
+  language sql stable security definer set search_path = public as
+$$ select exists (select 1 from warga where rumah = p_rumah and kk) $$;
+
+-- true bila nama itu terdata sebagai penghuni rumah akun yang login
+create or replace function public.anggota_saya(p_nama text) returns boolean
+  language sql stable security definer set search_path = public as
+$$ select exists (select 1 from warga where rumah = rumah_saya() and nama = p_nama) $$;
+
+-- Sebelum simpan: rapikan nomor rumah; anggota selalu dihitung 1 jiwa;
+-- kepala keluarga tidak bisa dihapus selama rumahnya masih punya anggota terdata.
+create or replace function public.warga_sebelum() returns trigger
+  language plpgsql security definer set search_path = public as
+$$
+begin
+  if tg_op = 'DELETE' then
+    if old.kk and exists (select 1 from warga where rumah = old.rumah and not kk) then
+      raise exception 'Rumah % masih punya anggota terdata. Hapus anggotanya dulu.', old.rumah;
+    end if;
+    return old;
+  end if;
+  new.rumah := upper(trim(new.rumah));
+  if new.kk then new.hubungan := 'Kepala keluarga'; else new.jiwa := 1; end if;
+  return new;
+end
+$$;
+
+-- Sesudah simpan: jumlah jiwa di baris kepala keluarga naik otomatis bila orang yang
+-- terdata melebihi jumlah jiwa awal. Bila nomor rumah kepala keluarga diubah, anggotanya ikut pindah.
+create or replace function public.warga_sesudah() returns trigger
+  language plpgsql security definer set search_path = public as
+$$
+declare v_rumah text[] := '{}'; r text; n integer;
+begin
+  if tg_op = 'UPDATE' then
+    if old.kk and new.kk and new.rumah <> old.rumah then
+      update warga set rumah = new.rumah where rumah = old.rumah and not kk;
+    end if;
+    v_rumah := array[new.rumah, old.rumah];
+  elsif tg_op = 'INSERT' then v_rumah := array[new.rumah];
+  else v_rumah := array[old.rumah];
+  end if;
+  foreach r in array v_rumah loop
+    select count(*) into n from warga where rumah = r;
+    update warga set jiwa = n where kk and rumah = r and jiwa < n;
+  end loop;
+  return null;
+end
+$$;
+
+drop trigger if exists warga_sebelum_trg on public.warga;
+create trigger warga_sebelum_trg before insert or update or delete on public.warga
+  for each row execute function public.warga_sebelum();
+drop trigger if exists warga_sesudah_trg on public.warga;
+create trigger warga_sesudah_trg after insert or update or delete on public.warga
+  for each row execute function public.warga_sesudah();
+
+-- Penghuni (izin 'rumah') boleh menambah, mengubah, dan menghapus ANGGOTA rumahnya sendiri.
+-- Nomor rumah terkunci ke rumah akunnya, dan rumah itu harus sudah didaftarkan pengurus.
+-- Baris kepala keluarga hanya bisa diubah oleh izin 'warga.kelola'.
+drop policy if exists warga_anggota_tambah on public.warga;
+create policy warga_anggota_tambah on public.warga for insert to authenticated
+  with check (public.punya_izin('rumah') and not kk and rumah = public.rumah_saya()
+              and public.rumah_terdaftar(rumah));
+drop policy if exists warga_anggota_ubah on public.warga;
+create policy warga_anggota_ubah on public.warga for update to authenticated
+  using (public.punya_izin('rumah') and not kk and rumah = public.rumah_saya())
+  with check (public.punya_izin('rumah') and not kk and rumah = public.rumah_saya());
+drop policy if exists warga_anggota_hapus on public.warga;
+create policy warga_anggota_hapus on public.warga for delete to authenticated
+  using (public.punya_izin('rumah') and not kk and rumah = public.rumah_saya());
+
+-- Surat boleh diajukan atas nama anggota rumah sendiri (kolom "untuk").
+drop policy if exists surat_ajukan on public.surat;
+create policy surat_ajukan on public.surat for insert to authenticated
+  with check (public.punya_izin('rumah') and user_id = auth.uid() and rumah = public.rumah_saya()
+              and pemohon = public.nama_saya() and status = 'Menunggu' and nomor is null and kode is null
+              and (untuk is null or public.anggota_saya(untuk)));
 
 -- ---------- 5. Fungsi transaksi ----------
 -- Nama bulan Indonesia dari teks 'YYYY-MM'.

@@ -9,23 +9,27 @@ insert into public.iuran_jenis (nama, jumlah) values
   ('Iuran sampah',   25000),
   ('Kas RT',         20000);
 
-insert into public.warga (rumah, nama, status, jiwa, hp, kk) values
-  ('A-01', 'Hendra Wijaya',      'Pemilik', 4, '0812-0000-0101', true),
-  ('A-02', 'Agus Santoso',       'Pemilik', 3, '0812-0000-0102', true),
-  ('A-03', 'Rina Marlina',       'Penyewa', 2, '0812-0000-0103', true),
-  ('A-04', 'Made Sudarsana',     'Pemilik', 5, '0812-0000-0104', true),
-  ('A-04', 'Sumiyati',           'ART',     1, '0812-0000-0114', false),
-  ('B-05', 'Fitri Handayani',    'Pemilik', 4, '0812-0000-0105', true),
-  ('B-06', 'Bambang Prasetyo',   'Pemilik', 4, '0812-0000-0106', true),
-  ('B-07', 'Yohanes Tan',        'Pemilik', 2, '0812-0000-0107', true),
-  ('B-08', 'Dewi Lestari',       'Penyewa', 3, '0812-0000-0108', true),
-  ('C-09', 'Ahmad Fauzi',        'Pemilik', 6, '0812-0000-0109', true),
-  ('C-09', 'Rizky Maulana',      'Kos',     1, '0812-0000-0119', false),
-  ('C-09', 'Dimas Aditya',       'Kos',     1, '0812-0000-0129', false),
-  ('C-10', 'Siti Nurhaliza',     'Penyewa', 2, '0812-0000-0110', true),
-  ('C-11', 'Paulus Simanjuntak', 'Pemilik', 4, '0812-0000-0111', true),
-  ('C-12', 'Sari Wulandari',     'Pemilik', 3, '0812-0000-0112', true),
-  ('C-12', 'Tuti Rahayu',        'ART',     1, '0812-0000-0122', false);
+-- Kepala keluarga tiap rumah, dengan jumlah jiwa awal (seluruh penghuni rumah).
+insert into public.warga (rumah, nama, kk, status, hubungan, kelamin, hp, jiwa) values
+  ('A-01', 'Hendra Wijaya',      true, 'Pemilik', 'Kepala keluarga', 'L', '0812-0000-0101', 4),
+  ('A-02', 'Agus Santoso',       true, 'Pemilik', 'Kepala keluarga', 'L', '0812-0000-0102', 3),
+  ('A-03', 'Rina Marlina',       true, 'Penyewa', 'Kepala keluarga', 'P', '0812-0000-0103', 2),
+  ('A-04', 'Made Sudarsana',     true, 'Pemilik', 'Kepala keluarga', 'L', '0812-0000-0104', 6),
+  ('B-05', 'Fitri Handayani',    true, 'Pemilik', 'Kepala keluarga', 'P', '0812-0000-0105', 4),
+  ('B-06', 'Bambang Prasetyo',   true, 'Pemilik', 'Kepala keluarga', 'L', '0812-0000-0106', 4),
+  ('B-07', 'Yohanes Tan',        true, 'Pemilik', 'Kepala keluarga', 'L', '0812-0000-0107', 2),
+  ('B-08', 'Dewi Lestari',       true, 'Penyewa', 'Kepala keluarga', 'P', '0812-0000-0108', 3),
+  ('C-09', 'Ahmad Fauzi',        true, 'Pemilik', 'Kepala keluarga', 'L', '0812-0000-0109', 8),
+  ('C-10', 'Siti Nurhaliza',     true, 'Penyewa', 'Kepala keluarga', 'P', '0812-0000-0110', 2),
+  ('C-11', 'Paulus Simanjuntak', true, 'Pemilik', 'Kepala keluarga', 'L', '0812-0000-0111', 4),
+  ('C-12', 'Sari Wulandari',     true, 'Pemilik', 'Kepala keluarga', 'P', '0812-0000-0112', 4);
+
+-- Anggota yang sudah terdata. Sisanya dilengkapi tiap warga dari aplikasi.
+insert into public.warga (rumah, nama, status, hubungan, kelamin, hp) values
+  ('A-04', 'Sumiyati',      'ART', 'ART',      'P', '0812-0000-0114'),
+  ('C-09', 'Rizky Maulana', 'Kos', 'Anak kos', 'L', '0812-0000-0119'),
+  ('C-09', 'Dimas Aditya',  'Kos', 'Anak kos', 'L', '0812-0000-0129'),
+  ('C-12', 'Tuti Rahayu',   'ART', 'ART',      'P', '0812-0000-0122');
 
 -- Tagihan September sampai November 2026 untuk setiap rumah.
 insert into public.tagihan (rumah, bulan, jumlah, lunas, metode, dibayar_pada)

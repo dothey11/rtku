@@ -15,7 +15,7 @@ js/store-supabase.js     baca/tulis ke database
 js/store-demo.js         data contoh untuk mode demo
 database/schema.sql      tabel, peran dan izin, aturan akses (RLS), fungsi, realtime, storage
 database/seed.sql        data awal contoh
-database/migrasi-003-peran-dinamis.sql   pembaruan untuk database lama: peran dan izin dinamis
+database/migrasi-004-data-per-orang.sql   pembaruan untuk database lama (memuat semua migrasi sebelumnya)
 ```
 
 ## Dua mode
@@ -111,9 +111,28 @@ Ketentuan tetap:
 - Peran yang masih dipakai akun tidak bisa dihapus.
 - Daftar kode izin sendiri tetap: menambah jenis izin baru berarti menambah fitur, dan itu perlu perubahan kode.
 
+## Data warga
+
+Satu baris data warga adalah satu orang.
+
+| Siapa | Yang dilakukan |
+|---|---|
+| Pengurus berizin `warga.kelola` (awalnya Ketua RT dan Sekretaris) | Mendaftarkan **kepala keluarga** tiap rumah (Pemilik atau Penyewa) beserta **jumlah jiwa awal**. Bisa juga menambah, mengubah, dan menghapus siapa pun. |
+| Warga (izin `rumah`) | Setelah login, menambah **anggota rumahnya sendiri**: istri atau suami, anak, orang tua, saudara, ART, anak kos. Nomor rumah terkunci ke rumah akunnya. Boleh mengubah dan menghapus anggota, tetapi tidak baris kepala keluarga. |
+
+Ketentuan yang ditegakkan database:
+
+- Satu rumah punya satu kepala keluarga. Warga baru bisa menambah anggota setelah rumahnya didaftarkan pengurus.
+- **Jumlah jiwa** di baris kepala keluarga berarti seluruh penghuni rumah, termasuk ART dan anak kos. Bila orang yang terdata melebihi angka itu, angkanya naik otomatis. Angka tidak turun sendiri saat anggota dihapus; pengurus bisa mengoreksinya.
+- Kepala keluarga tidak bisa dihapus selama rumahnya masih punya anggota terdata.
+- Bila nomor rumah kepala keluarga diubah, anggotanya ikut pindah.
+- Surat bisa diajukan atas nama anggota rumah sendiri (pilihan "Surat untuk").
+
+Yang dicatat per orang: nama, hubungan, jenis kelamin, tanggal lahir (opsional), nomor HP (opsional). NIK tidak dicatat.
+
 ### Database yang sudah terpasang sebelumnya
 
-Jalankan `database/migrasi-003-peran-dinamis.sql` satu kali di SQL Editor. File ini berlaku untuk database versi mana pun sebelumnya dan aman dijalankan ulang. Data yang ada tidak diubah. Database baru yang dibuat dari `schema.sql` terbaru tidak memerlukannya.
+Jalankan `database/migrasi-004-data-per-orang.sql` satu kali di SQL Editor. File ini memuat semua pembaruan sebelumnya (termasuk peran dan izin dinamis), berlaku untuk database versi mana pun, dan aman dijalankan ulang. Rincian perubahan pada data lama tertulis di bagian atas file. Database baru yang dibuat dari `schema.sql` terbaru tidak memerlukannya.
 
 ## Yang belum ada
 
