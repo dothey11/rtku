@@ -9,6 +9,8 @@
 -- Akun baru belum aktif: Ketua RT harus memverifikasinya dulu.
 create table public.profiles (
   id      uuid primary key references auth.users(id) on delete cascade,
+  username text not null unique check (username ~ '^[a-z0-9_.]{3,20}$'),   -- dipakai untuk masuk
+  email   text,                                                           -- email kontak, bukan kunci login
   nama    text not null,
   rumah   text not null default '-',
   peran   text not null default 'warga',   -- merujuk ke tabel peran (lihat bagian 3)
@@ -30,24 +32,8 @@ create function public.nama_saya() returns text
   language sql stable security definer set search_path = public as
 $$ select nama from profiles where id = auth.uid() and aktif $$;
 
--- Buat profil otomatis saat seseorang mendaftar.
-create function public.handle_new_user() returns trigger
-  language plpgsql security definer set search_path = public as
-$$
-begin
-  insert into profiles (id, nama, rumah)
-  values (
-    new.id,
-    coalesce(nullif(trim(new.raw_user_meta_data->>'nama'), ''), split_part(new.email, '@', 1)),
-    upper(coalesce(nullif(trim(new.raw_user_meta_data->>'rumah'), ''), '-'))
-  );
-  return new;
-end
-$$;
+-- (fungsi handle_new_user ada di bagian "Login dengan username" di bawah)
 
-create trigger on_auth_user_created
-  after insert on auth.users
-  for each row execute function public.handle_new_user();
 
 -- ---------- 2. Tabel data ----------
 create table public.iuran_jenis (
@@ -480,6 +466,82 @@ create policy surat_ajukan on public.surat for insert to authenticated
   with check (public.punya_izin('rumah') and user_id = auth.uid() and rumah = public.rumah_saya()
               and pemohon = public.nama_saya() and status = 'Menunggu' and nomor is null and kode is null
               and (untuk is null or public.anggota_saya(untuk)));
+
+-- ---------- Login dengan username ----------
+-- Warga masuk memakai USERNAME dan kata sandi. Supabase Auth tetap butuh sebuah alamat
+-- email sebagai pengenal internal; aplikasi membuatnya otomatis dari email pendaftar
+-- (namaemail+rtku.username@domain), sehingga satu email boleh dipakai beberapa akun
+-- (misalnya suami dan istri) dan warga tidak pernah mengetik email saat masuk.
+
+-- Buat profil otomatis saat seseorang mendaftar. Data diambil dari isian form pendaftaran.
+create or replace function public.handle_new_user() returns trigger
+  language plpgsql security definer set search_path = public as
+$$
+declare
+  v_user text := lower(trim(coalesce(new.raw_user_meta_data->>'username', '')));
+begin
+  if v_user = '' then
+    -- akun yang dibuat dari dashboard Supabase (tanpa form): turunkan username dari emailnya
+    v_user := rpad(left(regexp_replace(lower(split_part(new.email, '@', 1)), '[^a-z0-9_.]', '', 'g'), 15), greatest(3, least(15, length(regexp_replace(lower(split_part(new.email, '@', 1)), '[^a-z0-9_.]', '', 'g')))), '0');
+    if exists (select 1 from profiles where username = v_user) then
+      v_user := v_user || '_' || left(replace(new.id::text, '-', ''), 4);
+    end if;
+  end if;
+  if v_user !~ '^[a-z0-9_.]{3,20}$' then
+    raise exception 'Username hanya boleh huruf kecil, angka, titik, garis bawah (3 sampai 20 karakter)';
+  end if;
+  if exists (select 1 from profiles where username = v_user) then
+    raise exception 'Username sudah dipakai';
+  end if;
+  insert into profiles (id, username, nama, rumah, email)
+  values (
+    new.id,
+    v_user,
+    coalesce(nullif(trim(new.raw_user_meta_data->>'nama'), ''), v_user),
+    upper(coalesce(nullif(trim(new.raw_user_meta_data->>'rumah'), ''), '-')),
+    nullif(trim(coalesce(new.raw_user_meta_data->>'email', new.email)), '')
+  );
+  return new;
+end
+$$;
+
+-- Dipakai form pendaftaran (sebelum login): apakah username masih bebas?
+create or replace function public.username_tersedia(p_username text) returns boolean
+  language sql stable security definer set search_path = public as
+$$ select not exists (select 1 from profiles where username = lower(trim(p_username))) $$;
+
+-- Dipakai form masuk (sebelum login): alamat pengenal internal untuk username ini.
+-- CATATAN PRIVASI: fungsi ini bisa dipanggil tanpa login, jadi siapa pun yang tahu sebuah
+-- username bisa mengetahui alamat email pendaftarnya. Lihat README bagian "Login".
+create or replace function public.email_masuk(p_username text) returns text
+  language sql stable security definer set search_path = public as
+$$
+  select u.email::text from profiles p join auth.users u on u.id = p.id
+   where p.username = lower(trim(p_username))
+$$;
+
+-- Pengurus berizin 'akun.kelola' mengganti kata sandi warga yang lupa.
+create or replace function public.atur_ulang_sandi(p_user uuid, p_sandi text) returns void
+  language plpgsql security definer set search_path = public, extensions as
+$$
+begin
+  if not punya_izin('akun.kelola') then raise exception 'Peran Anda tidak punya izin mengatur akun'; end if;
+  if p_user = auth.uid() then raise exception 'Ganti kata sandi sendiri lewat akun Anda, bukan lewat menu ini'; end if;
+  if length(coalesce(p_sandi, '')) < 6 then raise exception 'Kata sandi minimal 6 karakter'; end if;
+  update auth.users set encrypted_password = crypt(p_sandi, gen_salt('bf')), updated_at = now()
+   where id = p_user;
+  if not found then raise exception 'Akun tidak ditemukan'; end if;
+end
+$$;
+
+revoke execute on function public.atur_ulang_sandi(uuid, text) from public, anon;
+grant execute on function public.atur_ulang_sandi(uuid, text) to authenticated;
+grant execute on function public.username_tersedia(text), public.email_masuk(text) to anon, authenticated;
+
+drop trigger if exists on_auth_user_created on auth.users;
+create trigger on_auth_user_created
+  after insert on auth.users
+  for each row execute function public.handle_new_user();
 
 -- ---------- 5. Fungsi transaksi ----------
 -- Nama bulan Indonesia dari teks 'YYYY-MM'.

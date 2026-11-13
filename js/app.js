@@ -120,17 +120,20 @@
     const tab = `<div class="tabs" role="group" aria-label="Masuk atau daftar"><button data-act="auth-tab" data-v="masuk" aria-pressed="${authTab === "masuk"}">Masuk</button><button data-act="auth-tab" data-v="daftar" aria-pressed="${authTab === "daftar"}">Daftar akun</button></div>`;
     const err = galat ? `<p class="err">${esc(galat)}</p>` : "";
     const form = authTab === "masuk"
-      ? `<form class="f" data-form="masuk"><div class="fld"><label for="a-e">Email</label><input id="a-e" name="email" type="email" required autocomplete="email"></div>
-          <div class="fld"><label for="a-p">Kata sandi</label><input id="a-p" name="password" type="password" required autocomplete="current-password"></div><button class="btn pri">Masuk</button></form>`
-      : `<form class="f" data-form="daftar"><div class="fld"><label for="d-n">Nama lengkap</label><input id="d-n" name="nama" required></div>
+      ? `<form class="f" data-form="masuk"><div class="fld"><label for="a-u">Username</label><input id="a-u" name="username" required autocomplete="username" autocapitalize="none" spellcheck="false"></div>
+          <div class="fld"><label for="a-p">Kata sandi</label><input id="a-p" name="password" type="password" required autocomplete="current-password"></div><button class="btn pri">Masuk</button>
+          <p class="small muted">Lupa kata sandi? Hubungi pengurus RT, kata sandi bisa diatur ulang oleh mereka.</p></form>`
+      : `<form class="f" data-form="daftar"><div class="fld"><label for="d-u">Username (untuk masuk)</label><input id="d-u" name="username" required minlength="3" maxlength="20" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="Contoh: budi_c12">
+            <span class="small muted">3 sampai 20 karakter: huruf kecil, angka, titik, atau garis bawah. Tanpa spasi.</span></div>
+          <div class="fld"><label for="d-n">Nama lengkap</label><input id="d-n" name="nama" required autocomplete="name"></div>
           <div class="fld"><label for="d-r">Nomor rumah</label><input id="d-r" name="rumah" required placeholder="Contoh: C-12"></div>
-          <div class="fld"><label for="d-e">Email</label><input id="d-e" name="email" type="email" required autocomplete="email"></div>
+          <div class="fld"><label for="d-e">Email</label><input id="d-e" name="email" type="email" required autocomplete="email"><span class="small muted">Hanya sebagai data kontak. Masuk tetap memakai username. Satu email boleh dipakai beberapa anggota keluarga.</span></div>
           <div class="fld"><label for="d-p">Kata sandi (minimal 6 karakter)</label><input id="d-p" name="password" type="password" minlength="6" required autocomplete="new-password"></div>
-          <button class="btn pri">Daftar</button><p class="small muted">Setelah mendaftar, akun perlu diverifikasi Ketua RT sebelum bisa dipakai.</p></form>`;
+          <button class="btn pri">Daftar</button><p class="small muted">Setelah mendaftar, akun perlu disetujui pengurus RT sebelum bisa dipakai.</p></form>`;
     return `<div class="card auth"><h1>Masuk ke RTku</h1><p class="muted">Aplikasi warga RT 04 / RW 07</p>${tab}${err}${form}</div>`;
   }
   function vMenunggu() {
-    return `<div class="card auth"><h1>Menunggu verifikasi</h1><p>Akun <b>${esc(S.me.nama)}</b> untuk rumah <b>${esc(S.me.rumah)}</b> sudah terdaftar. Ketua RT perlu memverifikasinya sebelum Anda bisa melihat data RT.</p>
+    return `<div class="card auth"><h1>Menunggu verifikasi</h1><p>Akun <b>${esc(S.me.username || "")}</b> atas nama <b>${esc(S.me.nama)}</b> untuk rumah <b>${esc(S.me.rumah)}</b> sudah terdaftar. Ketua RT perlu memverifikasinya sebelum Anda bisa melihat data RT.</p>
       <div style="display:flex;gap:8px"><button class="btn pri" data-act="cek-lagi">Periksa lagi</button><button class="btn" data-act="keluar">Keluar</button></div></div>`;
   }
 
@@ -360,8 +363,8 @@
     const daftar = S.akun.slice().sort((a, b) => (a.aktif - b.aktif) || String(b.dibuat).localeCompare(String(a.dibuat)));
     const akun = live
       ? `<div class="card"><div class="head"><h2>Akun pengguna</h2><span class="small muted">${S.akun.filter(a => !a.aktif).length} menunggu persetujuan</span></div>
-          <div class="list">${daftar.map(a => `<div class="row"><div class="grow"><b>${esc(a.nama)}</b> · rumah ${esc(a.rumah)}<p class="small muted">${a.aktif ? "Peran: " + esc(namaPeran(a.peran)) : "Mendaftar " + tgl(a.dibuat) + ", belum disetujui"}</p></div>
-            <div class="acts">${a.aktif ? pill("Aktif", "ok") : pill("Menunggu", "warn")}${a.id === me().id ? pill("Akun Anda", "mute") : `<span class="small">Peran:</span>${pilihPeran(a.id, a.peran)}<button class="btn pri sm" data-act="akun" data-uid="${a.id}" data-v="simpan">${a.aktif ? "Simpan peran" : "Setujui dengan peran ini"}</button>${a.aktif ? `<button class="btn sm" data-act="akun" data-uid="${a.id}" data-v="nonaktif">Nonaktifkan</button>` : ""}`}</div></div>`).join("")}</div>
+          <div class="list">${daftar.map(a => `<div class="row"><div class="grow"><b>${esc(a.nama)}</b> · rumah ${esc(a.rumah)}<p class="small muted">Username: <b>${esc(a.username || "")}</b>${a.email ? " · " + esc(a.email) : ""}</p><p class="small muted">${a.aktif ? "Peran: " + esc(namaPeran(a.peran)) : "Mendaftar " + tgl(a.dibuat) + ", belum disetujui"}</p></div>
+            <div class="acts">${a.aktif ? pill("Aktif", "ok") : pill("Menunggu", "warn")}${a.id === me().id ? pill("Akun Anda", "mute") : `<span class="small">Peran:</span>${pilihPeran(a.id, a.peran)}<button class="btn pri sm" data-act="akun" data-uid="${a.id}" data-v="simpan">${a.aktif ? "Simpan peran" : "Setujui dengan peran ini"}</button>${a.aktif ? `<button class="btn sm" data-act="akun" data-uid="${a.id}" data-v="nonaktif">Nonaktifkan</button>` : ""}<button class="btn sm" data-act="sandi" data-uid="${a.id}">Atur ulang sandi</button>`}</div></div>`).join("")}</div>
           <p class="small muted">Pilih peran di kotak pilihan, lalu klik tombolnya. Cocokkan nama dan nomor rumah dengan data warga lebih dulu: akun yang disetujui bisa melihat data rumah tersebut. Peran bisa diganti kapan saja dari sini.</p></div>`
       : `<div class="card"><h2>Akun pengguna</h2><p class="muted">Mode demo tidak memakai akun login. Setelah tersambung ke database, pendaftar baru muncul di sini untuk disetujui dan diberi peran.</p></div>`;
     const matriks = `<div class="card"><div class="head"><h2>Peran dan izin</h2><span class="small muted">Centang untuk memberi izin. Berlaku seketika.</span></div>
@@ -410,7 +413,7 @@
     if (act === "tutup-luar") { if (e.target === el) modal(""); return; }
     if (act === "tutup") { modal(""); return; }
     if (act === "auth-tab") { authTab = v; galat = ""; render(); return; }
-    if (act === "keluar") { await store.keluar(); masuk = false; S = null; location.hash = ""; render(); return; }
+    if (act === "keluar") { await store.keluar(); masuk = false; S = null; authTab = "masuk"; galat = ""; location.hash = ""; render(); return; }
     if (act === "cek-lagi") { await muat(); if (S && S.pending) toast("Belum diverifikasi"); return; }
     if (!S || S.pending) return;
     if (act === "role") { store.setRole(v); S = await store.load(); render(); return; }
@@ -444,6 +447,10 @@
       const uid = el.dataset.uid, sel = document.querySelector(`select[data-peran="${uid}"]`), peran = sel ? sel.value : "warga";
       aksi(() => store.aturAkun(uid, v === "nonaktif" ? { aktif: false } : { aktif: true, peran }), v === "nonaktif" ? "Akun dinonaktifkan" : `Akun aktif sebagai ${namaPeran(peran)}`); return;
     }
+    if (act === "sandi") {
+      const a = S.akun.find(x => x.id === el.dataset.uid); if (!a) return;
+      modal(`<h2>Atur ulang kata sandi</h2><p>Akun <b>${esc(a.username || "")}</b> (${esc(a.nama)}, rumah ${esc(a.rumah)}).</p><form class="f" data-form="sandi" data-uid="${a.id}"><div class="fld"><label for="rs-p">Kata sandi baru (minimal 6 karakter)</label><input id="rs-p" name="sandi" type="text" minlength="6" required autocomplete="off"></div><p class="small muted">Sampaikan kata sandi baru ini langsung kepada orangnya. Pastikan dulu bahwa yang meminta memang pemilik akun.</p><div style="display:flex;gap:8px;justify-content:flex-end"><button type="button" class="btn" data-act="tutup">Batal</button><button class="btn pri">Simpan kata sandi baru</button></div></form>`); return;
+    }
     if (act === "warga-ubah") {
       const w = S.warga.find(x => x.id === id); if (!w || !bolehUbah(w)) return;
       modal(`<h2>${w.kk ? "Ubah data kepala keluarga" : "Ubah data anggota"}</h2><form class="f" data-form="warga-ubah" data-id="${id}">${w.kk ? fieldKK("e", w) : fieldAnggota("e", w, w.rumah)}<div style="display:flex;gap:8px;justify-content:flex-end"><button type="button" class="btn" data-act="tutup">Batal</button><button class="btn pri">Simpan perubahan</button></div></form>`); return;
@@ -472,13 +479,15 @@
     if (k === "masuk" || k === "daftar") {
       if (sibuk) return; sibuk = true; galat = "";
       try {
-        if (k === "masuk") { await store.masuk(d.email.trim(), d.password); }
+        const username = d.username.trim().toLowerCase();
+        if (k === "masuk") { await store.masuk(username, d.password); }
         else {
-          const langsung = await store.daftar({ email: d.email.trim(), password: d.password, nama: d.nama.trim(), rumah: d.rumah.trim().toUpperCase() });
-          if (!langsung) { authTab = "masuk"; sibuk = false; render(); toast("Pendaftaran diterima. Buka email konfirmasi, lalu masuk."); return; }
+          if (!/^[a-z0-9_.]{3,20}$/.test(username)) { sibuk = false; galat = "Username harus 3 sampai 20 karakter: huruf kecil, angka, titik, atau garis bawah. Tanpa spasi."; render(); return; }
+          const langsung = await store.daftar({ username, email: d.email.trim(), password: d.password, nama: d.nama.trim(), rumah: d.rumah.trim().toUpperCase() });
+          if (!langsung) { authTab = "masuk"; sibuk = false; render(); toast("Pendaftaran diterima. Buka email konfirmasi, lalu masuk dengan username Anda."); return; }
         }
         sibuk = false; await muat();
-      } catch (err) { sibuk = false; galat = /invalid login/i.test(err.message) ? "Email atau kata sandi salah." : err.message; render(); }
+      } catch (err) { sibuk = false; galat = /invalid login/i.test(err.message) ? "Username atau kata sandi salah." : /not confirmed/i.test(err.message) ? "Email belum dikonfirmasi. Buka tautan di email pendaftaran, atau minta pengurus mematikan konfirmasi email." : err.message; render(); }
       return;
     }
     if (!S || S.pending) return;
@@ -500,6 +509,7 @@
     // Susun data orang dari isian form. Anggota: status hunian diturunkan dari pilihan hubungan.
     const orang = () => { const o = rapi({ nama: d.nama, kelamin: d.kelamin || null, tgl_lahir: d.tgl_lahir || null, hp: d.hp || "" }); if (d.hubungan) { const h = HUBUNGAN.find(x => x[0] === d.hubungan) || HUBUNGAN[5]; o.hubungan = h[0]; o.status = h[1]; } return o; };
     const dataKK = () => Object.assign(orang(), { rumah: d.rumah.trim().toUpperCase(), status: d.status === "Penyewa" ? "Penyewa" : "Pemilik", jiwa: Math.max(1, Math.round(Number(d.jiwa)) || 1) });
+    if (k === "sandi") { const uid = f.dataset.uid; modal(""); aksi(() => store.aturUlangSandi(uid, d.sandi), "Kata sandi baru tersimpan"); return; }
     if (k === "kk") { aksi(() => store.tambahKK(dataKK()), "Kepala keluarga didaftarkan"); return; }
     if (k === "anggota") { const rumah = f.dataset.v; modal(""); aksi(() => store.tambahAnggota(rumah, orang()), "Anggota ditambahkan"); return; }
     if (k === "warga-ubah") {

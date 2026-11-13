@@ -1,16 +1,12 @@
 -- =====================================================================
--- RTku migrasi 004: data warga per orang (sekaligus memuat migrasi 003)
+-- RTku migrasi 005: login dengan username (memuat semua migrasi sebelumnya)
 -- Untuk database yang SUDAH terpasang dari schema.sql versi mana pun sebelumnya.
 -- Jalankan SATU KALI di Supabase > SQL Editor. Aman dijalankan ulang.
 -- Database baru yang dibuat dari schema.sql terbaru TIDAK perlu file ini.
 --
--- Yang berubah pada data yang ada:
---   * Baris warga lama tetap ada. Kepala keluarga diberi hubungan "Kepala keluarga",
---     Kos menjadi "Anak kos", ART tetap "ART".
---   * Jumlah jiwa kepala keluarga sekarang berarti SELURUH penghuni rumah, jadi
---     ditambah dengan jumlah ART/kos yang sudah terdata di rumah itu (total tidak berubah).
---   * Bila satu rumah punya lebih dari satu kepala keluarga, yang pertama didaftarkan
---     dipertahankan dan yang lain menjadi anggota keluarga.
+-- Isi: (1) data warga per orang, (2) peran dan izin dinamis, (3) login username.
+-- Akun lama diberi username dari bagian depan emailnya, supaya tetap bisa masuk.
+-- Untuk mengosongkan akun dan data warga, jalankan reset-akun-dan-warga.sql SETELAH file ini.
 -- =====================================================================
 
 alter table public.surat add column if not exists untuk text;
@@ -451,3 +447,100 @@ begin
   end loop;
 end
 $$;
+
+-- ===== Login dengan username: kolom baru di profil =====
+alter table public.profiles add column if not exists username text;
+alter table public.profiles add column if not exists email text;
+
+-- Akun lama: email kontak = email login lama; username = bagian depan email (dibuat unik).
+update public.profiles p set email = u.email::text
+  from auth.users u where u.id = p.id and p.email is null;
+update public.profiles p
+   set username = rpad(left(regexp_replace(lower(split_part(u.email, '@', 1)), '[^a-z0-9_.]', '', 'g'), 15), greatest(3, least(15, length(regexp_replace(lower(split_part(u.email, '@', 1)), '[^a-z0-9_.]', '', 'g')))), '0')
+  from auth.users u where u.id = p.id and p.username is null;
+update public.profiles p set username = p.username || '_' || left(replace(p.id::text, '-', ''), 4)
+ where exists (select 1 from public.profiles x where x.username = p.username and x.id < p.id);
+
+alter table public.profiles alter column username set not null;
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'profiles_username_key') then
+    alter table public.profiles add constraint profiles_username_key unique (username);
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'profiles_username_check') then
+    alter table public.profiles add constraint profiles_username_check check (username ~ '^[a-z0-9_.]{3,20}$');
+  end if;
+end
+$$;
+
+-- ---------- Login dengan username ----------
+-- Warga masuk memakai USERNAME dan kata sandi. Supabase Auth tetap butuh sebuah alamat
+-- email sebagai pengenal internal; aplikasi membuatnya otomatis dari email pendaftar
+-- (namaemail+rtku.username@domain), sehingga satu email boleh dipakai beberapa akun
+-- (misalnya suami dan istri) dan warga tidak pernah mengetik email saat masuk.
+
+-- Buat profil otomatis saat seseorang mendaftar. Data diambil dari isian form pendaftaran.
+create or replace function public.handle_new_user() returns trigger
+  language plpgsql security definer set search_path = public as
+$$
+declare
+  v_user text := lower(trim(coalesce(new.raw_user_meta_data->>'username', '')));
+begin
+  if v_user = '' then
+    -- akun yang dibuat dari dashboard Supabase (tanpa form): turunkan username dari emailnya
+    v_user := rpad(left(regexp_replace(lower(split_part(new.email, '@', 1)), '[^a-z0-9_.]', '', 'g'), 15), greatest(3, least(15, length(regexp_replace(lower(split_part(new.email, '@', 1)), '[^a-z0-9_.]', '', 'g')))), '0');
+    if exists (select 1 from profiles where username = v_user) then
+      v_user := v_user || '_' || left(replace(new.id::text, '-', ''), 4);
+    end if;
+  end if;
+  if v_user !~ '^[a-z0-9_.]{3,20}$' then
+    raise exception 'Username hanya boleh huruf kecil, angka, titik, garis bawah (3 sampai 20 karakter)';
+  end if;
+  if exists (select 1 from profiles where username = v_user) then
+    raise exception 'Username sudah dipakai';
+  end if;
+  insert into profiles (id, username, nama, rumah, email)
+  values (
+    new.id,
+    v_user,
+    coalesce(nullif(trim(new.raw_user_meta_data->>'nama'), ''), v_user),
+    upper(coalesce(nullif(trim(new.raw_user_meta_data->>'rumah'), ''), '-')),
+    nullif(trim(coalesce(new.raw_user_meta_data->>'email', new.email)), '')
+  );
+  return new;
+end
+$$;
+
+-- Dipakai form pendaftaran (sebelum login): apakah username masih bebas?
+create or replace function public.username_tersedia(p_username text) returns boolean
+  language sql stable security definer set search_path = public as
+$$ select not exists (select 1 from profiles where username = lower(trim(p_username))) $$;
+
+-- Dipakai form masuk (sebelum login): alamat pengenal internal untuk username ini.
+-- CATATAN PRIVASI: fungsi ini bisa dipanggil tanpa login, jadi siapa pun yang tahu sebuah
+-- username bisa mengetahui alamat email pendaftarnya. Lihat README bagian "Login".
+create or replace function public.email_masuk(p_username text) returns text
+  language sql stable security definer set search_path = public as
+$$
+  select u.email::text from profiles p join auth.users u on u.id = p.id
+   where p.username = lower(trim(p_username))
+$$;
+
+-- Pengurus berizin 'akun.kelola' mengganti kata sandi warga yang lupa.
+create or replace function public.atur_ulang_sandi(p_user uuid, p_sandi text) returns void
+  language plpgsql security definer set search_path = public, extensions as
+$$
+begin
+  if not punya_izin('akun.kelola') then raise exception 'Peran Anda tidak punya izin mengatur akun'; end if;
+  if p_user = auth.uid() then raise exception 'Ganti kata sandi sendiri lewat akun Anda, bukan lewat menu ini'; end if;
+  if length(coalesce(p_sandi, '')) < 6 then raise exception 'Kata sandi minimal 6 karakter'; end if;
+  update auth.users set encrypted_password = crypt(p_sandi, gen_salt('bf')), updated_at = now()
+   where id = p_user;
+  if not found then raise exception 'Akun tidak ditemukan'; end if;
+end
+$$;
+
+revoke execute on function public.atur_ulang_sandi(uuid, text) from public, anon;
+grant execute on function public.atur_ulang_sandi(uuid, text) to authenticated;
+grant execute on function public.username_tersedia(text), public.email_masuk(text) to anon, authenticated;
+

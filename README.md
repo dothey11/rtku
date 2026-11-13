@@ -15,7 +15,8 @@ js/store-supabase.js     baca/tulis ke database
 js/store-demo.js         data contoh untuk mode demo
 database/schema.sql      tabel, peran dan izin, aturan akses (RLS), fungsi, realtime, storage
 database/seed.sql        data awal contoh
-database/migrasi-004-data-per-orang.sql   pembaruan untuk database lama (memuat semua migrasi sebelumnya)
+database/migrasi-005-login-username.sql   pembaruan untuk database lama (memuat semua migrasi sebelumnya)
+database/reset-akun-dan-warga.sql          mengosongkan akun dan data warga
 ```
 
 ## Dua mode
@@ -23,7 +24,7 @@ database/migrasi-004-data-per-orang.sql   pembaruan untuk database lama (memuat 
 | Mode | Kapan aktif | Data |
 |---|---|---|
 | Demo | `js/config.js` masih kosong | Data contoh, tersimpan di browser itu saja |
-| Database | `js/config.js` sudah diisi | Supabase, dipakai bersama semua warga, perlu login |
+| Database | `js/config.js` sudah diisi | Supabase, dipakai bersama semua warga, masuk dengan username |
 
 ## Cara memasang database
 
@@ -40,16 +41,16 @@ database/migrasi-004-data-per-orang.sql   pembaruan untuk database lama (memuat 
    ```
 
    Anon key aman berada di repo karena akses data dijaga aturan RLS. **Jangan pernah** memakai `service_role key` di sini.
-5. Buka aplikasi, pilih **Daftar akun**, dan daftar sebagai Ketua RT.
-   Supabase secara bawaan mengirim email konfirmasi. Untuk uji coba, ini bisa dimatikan di **Authentication > Sign In / Providers > Email > Confirm email**.
-6. Jadikan akun pertama itu Ketua RT. Jalankan di SQL Editor (ganti emailnya):
+5. Matikan konfirmasi email: **Authentication > Sign In / Providers > Email > Confirm email** (off). Tanpa ini setiap pendaftar harus membuka tautan di emailnya sebelum bisa masuk.
+6. Buka aplikasi, pilih **Daftar akun**, dan daftarkan diri Anda: username, nama lengkap, nomor rumah, email, kata sandi.
+7. Jadikan akun pertama itu Ketua RT. Jalankan di SQL Editor (ganti usernamenya):
 
    ```sql
-   update public.profiles set peran = 'ketua', aktif = true
-   where id = (select id from auth.users where email = 'email-anda@contoh.com');
+   update public.profiles set peran = 'ketua', aktif = true where username = 'username_anda';
    ```
 
-7. Akun berikutnya mendaftar sendiri, lalu Ketua RT menyetujuinya dan memilih perannya di menu **Pengaturan > Akun pengguna**. Akun yang belum diverifikasi tidak bisa melihat data apa pun.
+8. Masuk sebagai Ketua RT dan daftarkan kepala keluarga tiap rumah di menu **Warga & Tamu**.
+9. Akun berikutnya mendaftar sendiri, lalu Ketua RT menyetujuinya dan memilih perannya di menu **Pengaturan > Akun pengguna**. Akun yang belum disetujui tidak bisa melihat data apa pun.
 
 ## Cara menayangkan aplikasi
 
@@ -60,6 +61,28 @@ database/migrasi-004-data-per-orang.sql   pembaruan untuk database lama (memuat 
 Setelah punya alamat, masukkan alamat itu di Supabase **Authentication > URL Configuration > Site URL** supaya tautan di email konfirmasi mengarah ke aplikasi.
 
 Untuk mencoba di komputer sendiri: `npx serve .` lalu buka alamat yang ditampilkan.
+
+## Login dengan username
+
+Warga masuk dengan **username dan kata sandi**. Email hanya diisi saat mendaftar sebagai data kontak.
+
+| Hal | Cara kerjanya |
+|---|---|
+| Pendaftaran | Username, nama lengkap, nomor rumah, email, kata sandi |
+| Username | 3 sampai 20 karakter: huruf kecil, angka, titik, garis bawah. Harus unik. Disimpan di `profiles.username` |
+| Email | Disimpan di `profiles.email` sebagai kontak. Boleh sama untuk beberapa akun (misalnya suami dan istri) |
+| Lupa kata sandi | Pengurus berizin `akun.kelola` mengatur ulang dari **Pengaturan > Akun pengguna > Atur ulang sandi** |
+
+Supabase Auth tidak punya login username bawaan dan tetap membutuhkan sebuah alamat email sebagai pengenal internal. Aplikasi membuatnya otomatis dari email pendaftar dengan sisipan `+rtku.username` (contoh: `budi+rtku.budi01@gmail.com`), lalu menukar username dengan alamat itu saat masuk. Warga tidak pernah melihat atau mengetiknya.
+
+Dua hal yang perlu diketahui pengelola:
+
+- **Privasi:** penukaran username ke alamat internal (fungsi `email_masuk`) harus bisa dipanggil sebelum login. Akibatnya, orang yang mengetahui sebuah username dan alamat aplikasi bisa mengetahui email pendaftarnya. Bila ini tidak bisa diterima, jalan keluarnya adalah memindahkan proses masuk ke Supabase Edge Function.
+- **Email tetap harus beralamat sungguhan.** Supabase menolak domain yang tidak bisa menerima email, jadi alamat karangan seperti `nama@tidakada.xyz` akan gagal didaftarkan.
+
+### Mengosongkan akun dan data warga
+
+`database/reset-akun-dan-warga.sql` menghapus permanen semua akun login, data warga, tagihan, surat, sinyal SOS, laporan, dan buku tamu. Peran, izin, jenis iuran, kas, pengumuman, dan polling tetap. Sesudahnya ulangi langkah 6 sampai 9 di atas.
 
 ## Peran dan izin
 
@@ -132,7 +155,7 @@ Yang dicatat per orang: nama, hubungan, jenis kelamin, tanggal lahir (opsional),
 
 ### Database yang sudah terpasang sebelumnya
 
-Jalankan `database/migrasi-004-data-per-orang.sql` satu kali di SQL Editor. File ini memuat semua pembaruan sebelumnya (termasuk peran dan izin dinamis), berlaku untuk database versi mana pun, dan aman dijalankan ulang. Rincian perubahan pada data lama tertulis di bagian atas file. Database baru yang dibuat dari `schema.sql` terbaru tidak memerlukannya.
+Jalankan `database/migrasi-005-login-username.sql` satu kali di SQL Editor. File ini memuat semua pembaruan sebelumnya (data warga per orang, peran dan izin dinamis, login username), berlaku untuk database versi mana pun, dan aman dijalankan ulang. Rincian perubahan pada data lama tertulis di bagian atas file. Database baru yang dibuat dari `schema.sql` terbaru tidak memerlukannya.
 
 ## Yang belum ada
 
@@ -145,4 +168,4 @@ Jalankan `database/migrasi-004-data-per-orang.sql` satu kali di SQL Editor. File
 
 ## Status pengujian
 
-Skema, migrasi (dari tiap versi sebelumnya), aturan akses berbasis izin, dan fungsi database diuji pada PostgreSQL 16. Tampilan diuji dalam mode demo dan dengan klien Supabase tiruan. Sambungan ke proyek Supabase sungguhan belum diuji, jadi coba semua alur setelah langkah pemasangan di atas.
+Skema, migrasi (dari tiap versi sebelumnya), aturan akses berbasis izin, dan fungsi database diuji pada PostgreSQL 16. Tampilan diuji dalam mode demo dan dengan klien Supabase tiruan. Sambungan ke proyek Supabase sungguhan belum diuji, jadi coba semua alur setelah langkah pemasangan di atas. Ini terutama berlaku untuk pendaftaran, masuk dengan username, dan atur ulang sandi, yang bergantung pada perilaku Supabase Auth.

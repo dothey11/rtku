@@ -179,6 +179,7 @@ window.DemoStore = function () {
       D.warga = D.warga.filter(x => x.id !== id); save();
     },
     async aturAkun() {},
+    async aturUlangSandi() {},
     async tambahPeran(d) { D.peran.push({ kode: d.kode, nama: d.nama, bawaan: false, izin: [] }); save(); },
     async hapusPeran(kode) {
       const p = D.peran.find(x => x.kode === kode);

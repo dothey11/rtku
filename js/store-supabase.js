@@ -13,10 +13,22 @@ window.SupaStore = function (cfg) {
 
     // ----- akun -----
     async init() { const r = await sb.auth.getSession(); user = r.data && r.data.session ? r.data.session.user : null; return !!user; },
-    async masuk(email, password) { ok(await sb.auth.signInWithPassword({ email, password })); return this.init(); },
+    // Masuk dengan USERNAME. Supabase Auth mengenali akun lewat sebuah alamat internal,
+    // jadi username ditukar dulu dengan alamat itu (fungsi email_masuk di database).
+    async masuk(username, password) {
+      const alamat = ok(await sb.rpc("email_masuk", { p_username: username }));
+      if (!alamat) throw new Error("Invalid login credentials");
+      ok(await sb.auth.signInWithPassword({ email: alamat, password }));
+      return this.init();
+    },
+    // Daftar: username, nama, rumah, email, sandi. Alamat internal dibuat dari email pendaftar
+    // dengan sisipan "+rtku.username", sehingga satu email bisa dipakai beberapa akun keluarga.
     async daftar(d) {
-      const r = ok(await sb.auth.signUp({ email: d.email, password: d.password, options: { data: { nama: d.nama, rumah: d.rumah } } }));
-      user = r.session ? r.session.user : null; return !!user;   // false = perlu konfirmasi email dulu
+      if (!ok(await sb.rpc("username_tersedia", { p_username: d.username }))) throw new Error("Username itu sudah dipakai. Pilih yang lain.");
+      const at = d.email.lastIndexOf("@"), alamat = d.email.slice(0, at) + "+rtku." + d.username + d.email.slice(at);
+      const r = await sb.auth.signUp({ email: alamat.toLowerCase(), password: d.password, options: { data: { username: d.username, nama: d.nama, rumah: d.rumah, email: d.email } } });
+      if (r.error) throw new Error(/already registered/i.test(r.error.message) ? "Username itu sudah terdaftar dengan email tersebut." : /invalid/i.test(r.error.message) ? "Alamat email tidak diterima. Periksa penulisannya." : r.error.message);
+      user = r.data.session ? r.data.session.user : null; return !!user;   // false = perlu konfirmasi email dulu
     },
     async keluar() { await sb.auth.signOut(); user = null; },
 
@@ -106,6 +118,7 @@ window.SupaStore = function (cfg) {
 
     // ----- akun, peran, izin -----
     async aturAkun(id, ubah) { ok(await sb.from("profiles").update(ubah).eq("id", id)); },
+    async aturUlangSandi(id, sandi) { ok(await sb.rpc("atur_ulang_sandi", { p_user: id, p_sandi: sandi })); },
     async tambahPeran(d) { ok(await sb.from("peran").insert({ kode: d.kode, nama: d.nama })); },
     async hapusPeran(kode) {
       const r = await sb.from("peran").delete().eq("kode", kode);
